@@ -5,6 +5,7 @@ import { SessionService } from '../session/session.service';
 import { AuthTokenService } from './auth-token.service';
 import { AuthVerifyController } from './auth-verify.controller';
 import { VerifyDto } from './auth-verify.controller';
+import { AuthChallengeService } from './auth-challenge.service';
 
 // We need a real Keypair to test the signature verification path.
 import { Keypair } from '@stellar/stellar-sdk';
@@ -12,6 +13,10 @@ import { Keypair } from '@stellar/stellar-sdk';
 const TEST_KEYPAIR = Keypair.random();
 const TEST_WALLET_SECRET = TEST_KEYPAIR.secret();
 const TEST_WALLET_PUBLIC = TEST_KEYPAIR.publicKey();
+
+// Issue #231 — every test must issue a challenge prefixed with the same
+// STELLAR_HOME_DOMAIN that AuthVerifyController is configured to expect.
+const HOME_DOMAIN = 'ignition-pay.local';
 
 interface PartialVerifyDeps {
   prisma?: jest.Mocked<Pick<PrismaService, 'user' | '$transaction'>>;
@@ -48,6 +53,8 @@ function makeController(overrides: PartialVerifyDeps = {}): {
     ADMIN_WALLETS: '',
     JWT_SECRET: 'test-secret',
     REFRESH_TOKEN_SECRET: 'test-refresh-secret',
+    // Issue #231 — STELLAR_HOME_DOMAIN is the verified prefix.
+    STELLAR_HOME_DOMAIN: HOME_DOMAIN,
   });
   const challengeService = {
     consumeChallenge: jest.fn().mockResolvedValue(undefined),
@@ -88,6 +95,11 @@ function signChallenge(challenge: string): string {
   return keypair.sign(Buffer.from(challenge, 'utf8')).toString('base64');
 }
 
+function buildChallenge(nonce = 'nonce', ts = '1700000000'): string {
+  // Issue #231 — challenge MUST begin with configured home-domain.
+  return `${HOME_DOMAIN}:login:${nonce}:${ts}`;
+}
+
 describe('AuthVerifyController', () => {
   describe('verify', () => {
     it('rejects an invalid Stellar wallet address', async () => {
@@ -95,7 +107,7 @@ describe('AuthVerifyController', () => {
       const dto: VerifyDto = {
         walletAddress: 'NOT-A-VALID-ADDRESS',
         signedChallenge: 'sig',
-        challenge: 'c',
+        challenge: buildChallenge(),
       };
 
       await expect(controller.verify(dto)).rejects.toThrow(BadRequestException);
@@ -107,9 +119,54 @@ describe('AuthVerifyController', () => {
         controller.verify({
           walletAddress: TEST_WALLET_PUBLIC,
           signedChallenge: '',
-          challenge: 'c',
+          challenge: buildChallenge(),
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // Issue #231 — challenges whose prefix does not match the configured
+    // STELLAR_HOME_DOMAIN must be rejected BEFORE the (CPU-heavy) Ed25519
+    // signature verification runs.
+    // ────────────────────────────────────────────────────────────────────
+
+    it('rejects a challenge issued by a different home domain (#231)', async () => {
+      const { controller } = makeController();
+      const wrongDomainChallenge = `staging.${HOME_DOMAIN}:login:nonce:1700000000`;
+
+      await expect(
+        controller.verify({
+          walletAddress: TEST_WALLET_PUBLIC,
+          signedChallenge: Buffer.from('sig').toString('base64'),
+          challenge: wrongDomainChallenge,
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects a challenge with the old hardcoded `stellaraid:` prefix (#231)', async () => {
+      const { controller } = makeController();
+      const legacyChallenge = `stellaraid:login:nonce:1700000000`;
+
+      await expect(
+        controller.verify({
+          walletAddress: TEST_WALLET_PUBLIC,
+          signedChallenge: Buffer.from('sig').toString('base64'),
+          challenge: legacyChallenge,
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects a challenge whose `login` segment is missing (#231)', async () => {
+      const { controller } = makeController();
+      const malformed = `${HOME_DOMAIN}:nologin:nonce:1700000000`;
+
+      await expect(
+        controller.verify({
+          walletAddress: TEST_WALLET_PUBLIC,
+          signedChallenge: Buffer.from('sig').toString('base64'),
+          challenge: malformed,
+        }),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('rejects when the Ed25519 signature does not match', async () => {
@@ -118,13 +175,13 @@ describe('AuthVerifyController', () => {
         controller.verify({
           walletAddress: TEST_WALLET_PUBLIC,
           signedChallenge: Buffer.from('wrong-sig').toString('base64'),
-          challenge: 'stellaraid:login:nonce:ts',
+          challenge: buildChallenge(),
         }),
       ).rejects.toThrow(UnauthorizedException);
     });
 
     it('upserts the user atomically in a transaction, opens a session, and mints a token pair (Issues #110, #130)', async () => {
-      const challenge = 'stellaraid:login:nonce:ts';
+      const challenge = buildChallenge();
       const signedChallenge = signChallenge(challenge);
 
       const { controller, prisma, sessionService, tokenService } =
