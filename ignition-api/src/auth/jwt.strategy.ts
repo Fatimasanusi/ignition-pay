@@ -20,12 +20,14 @@ export interface JwtPayload {
   sid?: string;
   scope?: string;
 }
+import { AuthTokenService } from './auth-token.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     configService: ConfigService,
     private readonly permissionsService: PermissionsService,
+    private readonly tokenService: AuthTokenService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -38,6 +40,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   validate(payload: JwtPayload) {
+  async validate(payload: {
+    sub: string;
+    walletAddress: string;
+    email?: string;
+    role?: string;
+    sid?: string;
+  }) {
     if (!payload?.sub) {
       throw new UnauthorizedException('Invalid token');
     }
@@ -53,6 +62,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       encodedScopes.length > 0
         ? encodedScopes
         : this.permissionsService.getUserPermissions(payload.role ?? '');
+    if (
+      payload.sid &&
+      (await this.tokenService.isAccessTokenBlacklisted(payload.sid))
+    ) {
+      throw new UnauthorizedException('Session has been revoked');
+    }
 
     return {
       sub: payload.sub,

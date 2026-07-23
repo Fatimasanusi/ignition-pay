@@ -2,21 +2,28 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ApiKeyGuard } from './api-key.guard';
 import { ApiKeyExpirationService } from './api-key-expiration.service';
-import { ApiKeyExpirationService } from './api-key-expiration.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createHash } from 'crypto';
 
 describe('ApiKeyGuard', () => {
   let guard: ApiKeyGuard;
   let prisma: { apiKey: { findUnique: jest.Mock } };
+  let expirationService: { touchUsage: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
       apiKey: { findUnique: jest.fn() },
     };
+    expirationService = {
+      touchUsage: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ApiKeyGuard, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        ApiKeyGuard,
+        { provide: PrismaService, useValue: prisma },
+        { provide: ApiKeyExpirationService, useValue: expirationService },
+      ],
     }).compile();
 
     guard = module.get<ApiKeyGuard>(ApiKeyGuard);

@@ -213,7 +213,7 @@ describe('ApiKeysController', () => {
       apiKeys: [
         expect.objectContaining({
           id: 'api-key-1',
-          status: 'REVOKED',
+          status: 'revoked',
         }),
       ],
     });
