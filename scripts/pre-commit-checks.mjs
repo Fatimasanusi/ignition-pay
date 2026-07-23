@@ -306,7 +306,10 @@ function ensureBinary(binaryPath, binaryName, installHint) {
 
 function ensureCommand(command, errorMessage) {
   try {
-    execFileSync(command, ['--version'], { stdio: 'ignore' });
+    execFileSync(command, ['--version'], {
+      stdio: 'ignore',
+      shell: process.platform === 'win32',
+    });
   } catch {
     throw new Error(errorMessage);
   }
@@ -324,5 +327,6 @@ function runCommand(command, args, cwd) {
   execFileSync(command, args, {
     cwd,
     stdio: 'inherit',
+    shell: process.platform === 'win32',
   });
 }

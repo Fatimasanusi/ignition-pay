@@ -36,7 +36,16 @@ interface LogoutResponse {
  */
 @ApiTags('auth')
 @Controller('auth')
-@Throttle({ strict: { limit: 5, ttl: 60_000 } })
+@Throttle({
+  strict: {
+    limit: process.env.THROTTLE_STRICT_LIMIT
+      ? Number(process.env.THROTTLE_STRICT_LIMIT)
+      : 5,
+    ttl: process.env.THROTTLE_STRICT_TTL
+      ? Number(process.env.THROTTLE_STRICT_TTL)
+      : 60_000,
+  },
+})
 export class AuthLogoutController {
   constructor(
     private readonly sessionService: SessionService,
