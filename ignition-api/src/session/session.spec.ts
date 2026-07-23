@@ -7,6 +7,7 @@ import Keyv from 'keyv';
 import { SessionService, SessionMetadata } from './session.service';
 import { SessionController } from './session.controller';
 import { SessionGuard } from './session.guard';
+import { PermissionsService } from '../auth/permissions/permissions.service';
 
 describe('Session Module', () => {
   let sessionService: SessionService;
@@ -44,6 +45,9 @@ describe('Session Module', () => {
         { provide: CACHE_MANAGER, useValue: mockCache },
         { provide: ConfigService, useValue: mockConfig },
         { provide: JwtService, useValue: mockJwt },
+        // Issue #230 — SessionGuard now depends on PermissionsService to
+        // resolve the JWT `scope` claim into req.user.scopes.
+        PermissionsService,
       ],
     }).compile();
 
@@ -333,12 +337,21 @@ describe('Session Module', () => {
       const res = await sessionGuard.canActivate(mockContext);
 
       expect(res).toBe(true);
-      expect(mockRequest.user).toEqual({
-        userId: 'u1',
-        walletAddress: 'w1',
-        role: 'USER',
-        sessionId: 's1',
-      });
+      // Issue #230 — SessionGuard now also attaches `scopes`, derived
+      // from the role (no `scope` claim on this legacy token). Pin the
+      // shape with objectContaining so future fields don't break this test,
+      // but ALSO assert one USER-role permission is present so a silent
+      // regression to empty scopes would be caught.
+      expect(mockRequest.user).toEqual(
+        expect.objectContaining({
+          userId: 'u1',
+          walletAddress: 'w1',
+          role: 'USER',
+          sessionId: 's1',
+          scopes: expect.any(Array),
+        }),
+      );
+      expect(mockRequest.user.scopes).toContain('wallet:read');
       expect(touchSpy).toHaveBeenCalledWith('s1');
     });
   });

@@ -5,6 +5,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SessionService } from './session.service';
 import { SessionGuard } from './session.guard';
 import { SessionController } from './session.controller';
+// Issue #230: SessionGuard now resolves the JWT `scope` claim through
+// PermissionsService, so we re-export it from the auth permissions module
+// to keep the session module self-contained.
+import { PermissionsService } from '../auth/permissions/permissions.service';
 
 @Module({
   imports: [
@@ -21,7 +25,7 @@ import { SessionController } from './session.controller';
     }),
   ],
   controllers: [SessionController],
-  providers: [SessionService, SessionGuard],
-  exports: [SessionService, SessionGuard, JwtModule],
+  providers: [SessionService, SessionGuard, PermissionsService],
+  exports: [SessionService, SessionGuard, JwtModule, PermissionsService],
 })
 export class SessionModule {}

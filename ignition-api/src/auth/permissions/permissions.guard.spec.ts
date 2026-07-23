@@ -9,12 +9,17 @@ const mockReflector = (permissions: Permission[] | undefined) =>
     getAllAndOverride: jest.fn().mockReturnValue(permissions),
   }) as unknown as Reflector;
 
-const buildContext = (role: string | undefined) =>
+const buildContext = (role: string | undefined, scopes?: string[]) =>
   ({
     getHandler: () => ({}),
     getClass: () => ({}),
     switchToHttp: () => ({
-      getRequest: () => ({ user: role !== undefined ? { role } : undefined }),
+      getRequest: () => ({
+        user:
+          role !== undefined
+            ? { role, ...(scopes !== undefined ? { scopes } : {}) }
+            : undefined,
+      }),
     }),
   }) as unknown as ExecutionContext;
 
@@ -26,7 +31,7 @@ describe('PermissionsGuard', () => {
     expect(guard.canActivate(buildContext(UserRole.USER))).toBe(true);
   });
 
-  it('passes when USER has the required permission', () => {
+  it('passes when USER has the required permission (legacy role-based path)', () => {
     const guard = new PermissionsGuard(
       mockReflector([Permission.WALLET_READ]),
       service,
@@ -74,5 +79,59 @@ describe('PermissionsGuard', () => {
         Permission.ADMIN_USERS_KYC,
       );
     }
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Issue #230 — least-privilege enforcement.
+  //
+  // The guard must prefer the JWT-encoded `scopes` claim over the
+  // role-based fallback so a demoted role can no longer access admin
+  // endpoints as soon as the next access token is minted.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it('passes when user.scopes includes every required permission (#230)', () => {
+    const guard = new PermissionsGuard(
+      mockReflector([Permission.WALLET_READ, Permission.WALLET_CREATE]),
+      service,
+    );
+    expect(
+      guard.canActivate(
+        buildContext(UserRole.USER, ['wallet:read', 'wallet:create']),
+      ),
+    ).toBe(true);
+  });
+
+  it('throws ForbiddenException when user.scopes is missing a required permission (#230)', () => {
+    const guard = new PermissionsGuard(
+      mockReflector([Permission.WALLET_READ, Permission.ADMIN_USERS_KYC]),
+      service,
+    );
+    expect(() =>
+      guard.canActivate(
+        buildContext(UserRole.ADMIN, ['wallet:read']), // narrow token
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does NOT widen a narrow scope using the user role (#230)', () => {
+    const guard = new PermissionsGuard(
+      mockReflector([Permission.ADMIN_USERS_KYC]),
+      service,
+    );
+    // Despite being ADMIN (which would satisfy the role-based path), the
+    // explicit narrow scope set contained only `wallet:read`, so an
+    // attempt to access ADMIN_USERS_KYC must fail.
+    expect(() =>
+      guard.canActivate(buildContext(UserRole.ADMIN, ['wallet:read'])),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('falls back to role check when user.scopes is undefined (legacy tokens, #230)', () => {
+    const guard = new PermissionsGuard(
+      mockReflector([Permission.WALLET_READ]),
+      service,
+    );
+    // roles_only → scopes absent → fall through to PermissionsService.
+    expect(guard.canActivate(buildContext(UserRole.USER))).toBe(true);
   });
 });

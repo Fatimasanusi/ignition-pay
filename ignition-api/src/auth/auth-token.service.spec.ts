@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthTokenService } from './auth-token.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsService } from './permissions/permissions.service';
 import Keyv from 'keyv';
 import { UserRole } from '@prisma/client';
 
@@ -37,6 +38,11 @@ interface MockPrismaService {
   };
 }
 
+interface MockPermissionsService {
+  getScopeStringForRole: jest.Mock;
+  getUserPermissions: jest.Mock;
+}
+
 const mockPrisma = (): MockPrismaService => ({
   user: {
     findUnique: jest.fn(),
@@ -49,6 +55,7 @@ describe('AuthTokenService', () => {
   let prisma: MockPrismaService;
   let cache: MockKeyv;
   let config: ConfigService;
+  let perms: MockPermissionsService;
 
   const testUser = {
     id: 'user-123',
@@ -76,11 +83,22 @@ describe('AuthTokenService', () => {
       JWT_SECRET: 'test-jwt-secret',
       REFRESH_TOKEN_SECRET: 'test-refresh-secret',
     });
+    // Issue #230: PermissionsService is now injected. Mock the scope-string
+    // lookup with a recognisable token so assertions can pin it.
+    perms = {
+      getScopeStringForRole: jest
+        .fn()
+        .mockReturnValue('wallet:read wallet:create'),
+      getUserPermissions: jest
+        .fn()
+        .mockReturnValue(['wallet:read', 'wallet:create']),
+    };
 
     service = new AuthTokenService(
       jwt as unknown as JwtService,
       config,
       prisma as unknown as PrismaService,
+      perms as unknown as PermissionsService,
       cache as unknown as Keyv,
     );
   });
@@ -210,11 +228,13 @@ describe('AuthTokenService', () => {
       const result = await service.validateAndRotate(validRefreshToken);
 
       // Feature: token-refresh-endpoint, Property 4: New access token always contains the correct claims
+      // Issue #230: also includes a `scope` claim derived from the role.
       expect(jwt.sign).toHaveBeenCalledWith(
         expect.objectContaining({
           sub: testUser.id,
           walletAddress: testUser.walletAddress,
           role: testUser.role,
+          scope: 'wallet:read wallet:create',
         }),
         expect.objectContaining({
           secret: 'test-jwt-secret',
@@ -239,6 +259,10 @@ describe('AuthTokenService', () => {
         newRefreshToken,
         7 * 24 * 60 * 60 * 1000,
       );
+
+      // Issue #230 — on rotation, scope must be re-derived from the user's
+      // fresh role so role changes take effect on the very next refresh.
+      expect(perms.getScopeStringForRole).toHaveBeenCalledWith(testUser.role);
 
       // Feature: token-refresh-endpoint, Property 7: Successful refresh response always contains all required fields
       expect(result).toEqual({
@@ -288,18 +312,22 @@ describe('AuthTokenService', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   describe('issueTokenPair', () => {
-    it('mints access + refresh tokens with correct access claims', async () => {
+    it('mints access + refresh tokens with correct access claims, including scope (#230)', async () => {
       jwt.sign
         .mockReturnValueOnce(newAccessToken)
         .mockReturnValueOnce(newRefreshToken);
 
       const result = await service.issueTokenPair(testUser);
 
+      // Issue #230 — the role is fed into the scope-string lookup.
+      expect(perms.getScopeStringForRole).toHaveBeenCalledWith(testUser.role);
+
       expect(jwt.sign).toHaveBeenCalledWith(
         expect.objectContaining({
           sub: testUser.id,
           walletAddress: testUser.walletAddress,
           role: testUser.role,
+          scope: 'wallet:read wallet:create',
         }),
         expect.objectContaining({
           secret: 'test-jwt-secret',
@@ -326,6 +354,7 @@ describe('AuthTokenService', () => {
           sub: testUser.id,
           walletAddress: testUser.walletAddress,
           role: testUser.role,
+          scope: 'wallet:read wallet:create',
           sid: 'sess-abc',
         }),
       );
