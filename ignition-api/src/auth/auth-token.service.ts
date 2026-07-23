@@ -224,4 +224,48 @@ export class AuthTokenService {
       throw new ServiceUnavailableException('Service temporarily unavailable');
     }
   }
+
+  // ── Access-token blacklist ──────────────────────────────────────────────
+
+  /**
+   * Redis key used to flag a session ID as revoked.
+   * Checked by JwtStrategy.validate() so that even standard
+   * JwtAuthGuard-protected endpoints reject tokens whose session
+   * was destroyed (e.g. on logout).
+   */
+  blacklistKey(sessionId: string): string {
+    return `revoked:${sessionId}`;
+  }
+
+  /**
+   * Blacklist the current access token by its session ID.
+   * The entry expires after 15 minutes — the same TTL as the
+   * access token itself — so no manual cleanup is needed.
+   */
+  async blacklistAccessToken(sessionId: string): Promise<void> {
+    try {
+      await this.cache.set(
+        this.blacklistKey(sessionId),
+        '1',
+        15 * 60 * 1000, // 15 minutes in ms
+      );
+    } catch {
+      throw new ServiceUnavailableException('Service temporarily unavailable');
+    }
+  }
+
+  /**
+   * Returns true when the given session ID has been explicitly
+   * blacklisted (i.e. the session was revoked / user logged out).
+   */
+  async isAccessTokenBlacklisted(sessionId: string): Promise<boolean> {
+    try {
+      const val = await this.cache.get<string>(this.blacklistKey(sessionId));
+      return val === '1';
+    } catch {
+      // If Redis is down, fail open — the session guard / JWT
+      // expiry will still protect the endpoint.
+      return false;
+    }
+  }
 }

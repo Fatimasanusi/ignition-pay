@@ -404,4 +404,57 @@ describe('AuthTokenService', () => {
       ).rejects.toThrow(ServiceUnavailableException);
     });
   });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Access-token blacklist
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('blacklistAccessToken', () => {
+    it('stores a revoked flag for the session id with 15-minute TTL', async () => {
+      cache.set.mockResolvedValue('OK');
+
+      await service.blacklistAccessToken('sess-abc');
+
+      expect(cache.set).toHaveBeenCalledWith(
+        'revoked:sess-abc',
+        '1',
+        15 * 60 * 1000,
+      );
+    });
+
+    it('returns 503 when cache.set fails', async () => {
+      cache.set.mockRejectedValue(new Error('Redis error'));
+
+      await expect(service.blacklistAccessToken('sess-abc')).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+    });
+  });
+
+  describe('isAccessTokenBlacklisted', () => {
+    it('returns true when session id is in the blacklist', async () => {
+      cache.get.mockResolvedValue('1');
+
+      const result = await service.isAccessTokenBlacklisted('sess-abc');
+
+      expect(result).toBe(true);
+      expect(cache.get).toHaveBeenCalledWith('revoked:sess-abc');
+    });
+
+    it('returns false when session id is not in the blacklist', async () => {
+      cache.get.mockResolvedValue(undefined);
+
+      const result = await service.isAccessTokenBlacklisted('sess-abc');
+
+      expect(result).toBe(false);
+    });
+
+    it('returns false (fail-open) when cache throws', async () => {
+      cache.get.mockRejectedValue(new Error('Redis error'));
+
+      const result = await service.isAccessTokenBlacklisted('sess-abc');
+
+      expect(result).toBe(false);
+    });
+  });
 });
