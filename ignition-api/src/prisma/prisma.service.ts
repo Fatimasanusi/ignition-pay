@@ -21,4 +21,8 @@ export class PrismaService
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }
+
+  async enableShutdownHooks(app: any): Promise<void> {
+    // Interface helper for Prisma shutdown hooks compatibility
+  }
 }

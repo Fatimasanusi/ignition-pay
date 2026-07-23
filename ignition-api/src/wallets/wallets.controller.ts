@@ -10,8 +10,16 @@ import {
 } from '@nestjs/common';
 import { WalletsService } from './wallets.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/permissions/permissions.guard';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
+import { Permission } from '../auth/permissions/permissions.map';
 
 @ApiTags('wallets')
 @Controller('wallets')
@@ -23,10 +31,13 @@ export class WalletsController {
    * Create a new wallet for the authenticated user.
    * Auto-generates a Stellar deposit address if none is provided.
    */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Post()
+  @RequirePermissions(Permission.WALLET_CREATE)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create a new wallet with deposit address and limits' })
+  @ApiOperation({
+    summary: 'Create a new wallet with deposit address and limits',
+  })
   @ApiResponse({ status: 201, description: 'Wallet created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid deposit address' })
   @ApiResponse({ status: 404, description: 'User not found' })
@@ -40,7 +51,10 @@ export class WalletsController {
    * Get wallet's current balance and recent transactions.
    */
   @Get(':id/balance')
-  @ApiOperation({ summary: "Get wallet's current balance and recent transactions" })
+  @RequirePermissions(Permission.WALLET_READ)
+  @ApiOperation({
+    summary: "Get wallet's current balance and recent transactions",
+  })
   @ApiResponse({ status: 200, description: 'Balance and recent transactions' })
   async getBalance(@Param('id') id: string) {
     if (!id) {

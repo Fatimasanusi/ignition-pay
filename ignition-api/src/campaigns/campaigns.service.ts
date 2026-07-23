@@ -1,8 +1,15 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { Prisma } from '@prisma/client';
-import { BrowseCampaignsQueryDto, BrowseCampaignsResponseDto } from './dto/browse-campaigns.dto';
+import {
+  BrowseCampaignsQueryDto,
+  BrowseCampaignsResponseDto,
+} from './dto/browse-campaigns.dto';
 
 @Injectable()
 export class CampaignsService {
@@ -14,7 +21,10 @@ export class CampaignsService {
     dto: UpdateCampaignDto,
   ) {
     const campaign = await this.prisma.campaign.findUnique({
-      where: { id: campaignId },
+      where: {
+        id: campaignId,
+        status: { notIn: ['CANCELLED', 'REJECTED', 'COMPLETED'] },
+      },
     });
 
     if (!campaign) {
@@ -174,7 +184,8 @@ export class CampaignsService {
       endDate: dto.endDate ? new Date(dto.endDate) : undefined,
       status: 'ACTIVE',
       creatorId: userId,
-      milestones: milestoneCreates.length > 0 ? { create: milestoneCreates } : undefined,
+      milestones:
+        milestoneCreates.length > 0 ? { create: milestoneCreates } : undefined,
     };
 
     const created = await this.prisma.campaign.create({

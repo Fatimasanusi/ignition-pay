@@ -1,0 +1,130 @@
+# ---------------------------------------------------------------------------
+# Ignition-mobile integration tests
+#
+# Runs the `integration_test/` bundle on Android (Linux runner via
+# reactivecircus/android-emulator-runner) and iOS (macOS runner; iOS
+# simulators aren't available on Linux).
+#
+# Every job installs Flutter, runs `flutter analyze` (catches broken imports
+# before the test runner even starts), then drives the suite with
+# `flutter test integration_test/app_test.dart --dart-define=SCENARIO=...`.
+#
+# Trigger:
+#   - push / pull_request to main & feature branches
+#   - manual dispatch via the "Run workflow" button
+# ---------------------------------------------------------------------------
+
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ignition-mobile/integration_test/**'
+      - 'ignition-mobile/lib/**'
+      - 'ignition-mobile/pubspec.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ignition-mobile/integration_test/**'
+      - 'ignition-mobile/lib/**'
+      - 'ignition-mobile/pubspec.yaml'
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android emulator (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [33]
+        arch: [x86_64]
+        scenario: [app_launch, deep_link, auth_flow, android, all]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+
+      - name: Cache Pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ignition-mobile/.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('ignition-mobile/pubspec.yaml', 'ignition-mobile/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install dependencies
+        working-directory: ignition-mobile
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: ignition-mobile
+        run: flutter analyze --no-pub
+
+      - name: Run integration tests on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: ${{ matrix.arch }}
+          profile: pixel_6
+          script: |
+            cd ignition-mobile
+            flutter test integration_test/app_test.dart \
+              --dart-define=SCENARIO=${{ matrix.scenario }}
+
+  ios:
+    name: iOS simulator (${{ matrix.scenario }})
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [app_launch, deep_link, auth_flow, ios, all]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+
+      - name: Cache Pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ignition-mobile/.dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('ignition-mobile/pubspec.yaml', 'ignition-mobile/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install dependencies
+        working-directory: ignition-mobile
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: ignition-mobile
+        run: flutter analyze --no-pub
+
+      - name: Boot iOS simulator
+        run: |
+          xcrun simctl list devices available | grep -E "iPhone 15 \(" | head -1
+          xcrun simctl boot "iPhone 15" || true
+          xcrun simctl bootstatus "iPhone 15" -b
+
+      - name: Run integration tests
+        working-directory: ignition-mobile
+        run: |
+          flutter test integration_test/app_test.dart \
+            -d "iPhone 15" \
+            --dart-define=SCENARIO=${{ matrix.scenario }}

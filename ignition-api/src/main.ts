@@ -1,12 +1,27 @@
 import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import {
-  DocumentBuilder,
-  SwaggerModule,
-} from '@nestjs/swagger';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { initSentry } from './common/sentry/sentry.middleware';
+import { ValidationExceptionFilter } from './common/validation-exception.filter';
 
 async function bootstrap() {
+  initSentry(process.env.SENTRY_DSN ?? '');
+
   const app = await NestFactory.create(AppModule);
+
+  app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  app.useGlobalFilters(new ValidationExceptionFilter());
 
   const config = new DocumentBuilder()
     .setTitle('StellarAid API')
@@ -44,9 +59,8 @@ async function bootstrap() {
       serverAdapter,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const expressApp = app.getHttpAdapter().getInstance();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+
     expressApp.use('/admin/queues', serverAdapter.getRouter());
   }
 

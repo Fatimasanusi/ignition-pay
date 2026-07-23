@@ -2,13 +2,26 @@ import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import Keyv from 'keyv';
 import { PrismaService } from '../prisma/prisma.service';
+import { SessionService } from '../session/session.service';
 import { UsersService } from './users.service';
 
 jest.mock('bcryptjs', () => ({
   compare: jest.fn(),
   hash: jest.fn(),
 }));
+
+jest.mock('keyv', () => {
+  return {
+    __esModule: true,
+    default: jest.fn().mockImplementation(() => ({
+      get: jest.fn(),
+      set: jest.fn(),
+      delete: jest.fn(),
+    })),
+  };
+});
 
 const bcryptMock = bcrypt as jest.Mocked<typeof bcrypt>;
 
@@ -48,12 +61,14 @@ const baseUser = {
 describe('UsersService password security', () => {
   let prisma: PrismaMock;
   let service: UsersService;
+  let cache: Keyv;
 
   beforeEach(() => {
     prisma = {
       user: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        findUnique: jest.fn(),
       },
       passwordHistory: {
         findMany: jest.fn<Promise<PasswordHistoryRecord[]>, []>(),
@@ -63,6 +78,12 @@ describe('UsersService password security', () => {
       $transaction: jest.fn((callback) => callback(prisma)),
     };
 
+    cache = {
+      get: jest.fn(),
+      set: jest.fn(),
+      delete: jest.fn(),
+    } as unknown as Keyv;
+
     bcryptMock.compare.mockReset();
     bcryptMock.hash.mockReset();
     bcryptMock.hash.mockResolvedValue('hash:new-password' as never);
@@ -71,6 +92,8 @@ describe('UsersService password security', () => {
       prisma as unknown as PrismaService,
       { sign: jest.fn() } as unknown as JwtService,
       new ConfigService({ PASSWORD_BCRYPT_ROUNDS: '12' }),
+      cache,
+      { createSession: jest.fn() } as unknown as SessionService,
     );
   });
 
@@ -208,6 +231,603 @@ describe('UsersService password security', () => {
       where: {
         id: { in: ['delete-1'] },
       },
+    });
+  });
+});
+
+describe('UsersService login', () => {
+  let prisma: {
+    user: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      update: jest.Mock;
+    };
+  };
+  let cache: { set: jest.Mock };
+  let service: UsersService;
+
+  beforeEach(() => {
+    prisma = {
+      user: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    cache = {
+      set: jest.fn(),
+    };
+
+    service = new UsersService(
+      prisma as unknown as PrismaService,
+      {
+        sign: jest.fn().mockReturnValue('signed-jwt-token'),
+      } as unknown as JwtService,
+      new ConfigService({
+        JWT_SECRET: 'test-secret',
+        REFRESH_TOKEN_SECRET: 'test-refresh-secret',
+      }),
+      cache as unknown as Keyv,
+      {
+        createSession: jest
+          .fn()
+          .mockResolvedValue({ sessionId: 'test-session' }),
+      } as any,
+    );
+  });
+
+  it('stores refresh token in Redis on successful login', async () => {
+    const mockUser = {
+      id: 'user-123',
+      walletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      email: 'test@example.com',
+      passwordHash: 'hashed-password',
+      role: 'USER',
+      loginAttempts: 0,
+      lockedUntil: null,
+    };
+
+    prisma.user.findFirst.mockResolvedValue(mockUser);
+    prisma.user.update.mockResolvedValue({});
+    bcryptMock.compare.mockResolvedValueOnce(true as never);
+
+    await service.login('test@example.com', 'password123');
+
+    expect(cache.set).toHaveBeenCalledWith(
+      `refresh:${mockUser.walletAddress}`,
+      expect.any(String),
+      7 * 24 * 60 * 60 * 1000,
+    );
+  });
+});
+
+describe('UsersService profile calculations', () => {
+  let prisma: {
+    user: {
+      findFirst: jest.Mock;
+      update: jest.Mock;
+      findUnique: jest.Mock;
+    };
+  };
+  let cache: Keyv;
+  let service: UsersService;
+
+  const baseDate = new Date('2025-01-01T00:00:00Z');
+
+  const baseProfileUser = () => ({
+    id: 'profile-user-1',
+    walletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+    email: 'profile@example.com',
+    displayName: 'Profile User',
+    name: 'Profile User',
+    phone: '+1234567890',
+    bio: 'A test profile user',
+    avatarUrl: 'https://example.com/avatar.png',
+    role: 'USER' as const,
+    kycStatus: 'VERIFIED' as const,
+    emailVerifiedAt: baseDate,
+    createdAt: baseDate,
+    updatedAt: baseDate,
+    deletedAt: null as Date | null,
+    isActive: true,
+    loginAttempts: 0,
+    lockedUntil: null,
+    verifiedStatus: true,
+    passwordHash: null,
+    preferences: null,
+    socialLinks: null,
+  });
+
+  const mockUserWithRelations = (overrides?: {
+    campaigns?: Array<{ raisedAmount: number; status: string }>;
+    donations?: Array<{ amount: number }>;
+  }) => {
+    const campaignsData = overrides?.campaigns ?? [];
+    return {
+      ...baseProfileUser(),
+      campaigns: campaignsData.map((c, i) => ({
+        id: `campaign-${i}`,
+        title: `Test Campaign ${i}`,
+        description: `A test campaign ${i}`,
+        goalAmount: 1000,
+        raisedAmount: c.raisedAmount,
+        status: c.status,
+        creatorId: 'profile-user-1',
+        startDate: null,
+        endDate: null,
+        imageUrl: null,
+        category: null,
+        createdAt: baseDate,
+        updatedAt: baseDate,
+      })),
+      donations: (overrides?.donations ?? []).map((d, i) => ({
+        id: `donation-${i}`,
+        amount: d.amount,
+        assetCode: 'XLM',
+        txHash: null,
+        status: 'COMPLETED' as const,
+        donorId: 'profile-user-1',
+        campaignId: 'campaign-0',
+        donatedAt: baseDate,
+        confirmedAt: baseDate,
+        createdAt: baseDate,
+        updatedAt: baseDate,
+      })),
+    };
+  };
+
+  // Helper: apply include filter as Prisma would (cascades into nested relation where clauses)
+  function applyIncludeFilter(
+    user: ReturnType<typeof mockUserWithRelations>,
+    include: any,
+  ) {
+    if (!include) return user;
+    const result = { ...user };
+    if (include.campaigns?.where?.status) {
+      result.campaigns = result.campaigns.filter(
+        (c: any) => c.status === include.campaigns.where.status,
+      );
+    }
+    return result;
+  }
+
+  // Set up findFirst to respect include filters + provide base data
+  function mockFindFirstData(data: ReturnType<typeof mockUserWithRelations>) {
+    prisma.user.findFirst.mockImplementation((args: any) => {
+      if (!args) return null;
+      if (
+        args?.where?.deletedAt === null &&
+        args?.where?.walletAddress === 'UNKNOWN_WALLET'
+      ) {
+        return null;
+      }
+      return applyIncludeFilter(data, args?.include);
+    });
+  }
+
+  beforeEach(() => {
+    prisma = {
+      user: {
+        findFirst: jest.fn(),
+        update: jest.fn().mockImplementation((args: any) => {
+          return {
+            ...mockUserWithRelations({ campaigns: [], donations: [] }),
+            ...args.data,
+            campaigns: mockUserWithRelations({ campaigns: [], donations: [] })
+              .campaigns,
+            donations: mockUserWithRelations({ campaigns: [], donations: [] })
+              .donations,
+          };
+        }),
+        findUnique: jest.fn(),
+      },
+    };
+
+    cache = {
+      get: jest.fn(),
+      set: jest.fn(),
+      delete: jest.fn(),
+    } as unknown as Keyv;
+
+    service = new UsersService(
+      prisma as unknown as PrismaService,
+      { sign: jest.fn() } as unknown as JwtService,
+      new ConfigService({}),
+      cache,
+    );
+  });
+
+  describe('getMyProfile', () => {
+    it('returns full profile with aggregated stats from related campaigns and donations', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({
+          campaigns: [
+            { raisedAmount: 500, status: 'ACTIVE' },
+            { raisedAmount: 300, status: 'ACTIVE' },
+          ],
+          donations: [{ amount: 100 }, { amount: 50 }, { amount: 25 }],
+        }),
+      );
+
+      const result = await service.getMyProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.totalRaised).toBe(800);
+      expect(result.totalDonated).toBe(175);
+      expect(result.campaignCount).toBe(2);
+      expect(result.id).toBe('profile-user-1');
+      expect(result.email).toBe('profile@example.com');
+      expect(result.displayName).toBe('Profile User');
+      expect(result.name).toBe('Profile User');
+      expect(result.phone).toBe('+1234567890');
+      expect(result.bio).toBe('A test profile user');
+      expect(result.avatarUrl).toBe('https://example.com/avatar.png');
+      expect(result.role).toBe('USER');
+      expect(result.kycStatus).toBe('VERIFIED');
+      expect(result.emailVerifiedAt).toEqual(baseDate);
+      expect(result.createdAt).toEqual(baseDate);
+      expect(result.updatedAt).toEqual(baseDate);
+      expect(result.deletedAt).toBeUndefined();
+    });
+
+    it('only counts ACTIVE campaigns and excludes DRAFT or COMPLETED', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({
+          campaigns: [
+            { raisedAmount: 1000, status: 'ACTIVE' },
+            { raisedAmount: 500, status: 'DRAFT' },
+            { raisedAmount: 200, status: 'COMPLETED' },
+          ],
+          donations: [],
+        }),
+      );
+
+      const result = await service.getMyProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.campaignCount).toBe(1);
+      expect(result.totalRaised).toBe(1000);
+    });
+
+    it('returns zero stats when user has no campaigns or donations', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      const result = await service.getMyProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.totalRaised).toBe(0);
+      expect(result.totalDonated).toBe(0);
+      expect(result.campaignCount).toBe(0);
+    });
+
+    it('returns zero stats when user has no active campaigns but has non-active ones', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({
+          campaigns: [
+            { raisedAmount: 500, status: 'DRAFT' },
+            { raisedAmount: 300, status: 'COMPLETED' },
+          ],
+          donations: [],
+        }),
+      );
+
+      const result = await service.getMyProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.campaignCount).toBe(0);
+      expect(result.totalRaised).toBe(0);
+    });
+
+    it('throws NotFoundException when user is not found', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await expect(service.getMyProfile('UNKNOWN_WALLET')).rejects.toThrow(
+        'User not found',
+      );
+    });
+
+    it('queries with walletAddress and deletedAt:null filter', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await service.getMyProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: {
+          walletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+          deletedAt: null,
+        },
+        include: {
+          campaigns: { where: { status: 'ACTIVE' } },
+          donations: true,
+        },
+      });
+    });
+
+    it('handles undefined optional fields', async () => {
+      const userData = mockUserWithRelations({ campaigns: [], donations: [] });
+      userData.displayName = null;
+      userData.name = null;
+      userData.phone = null;
+      userData.bio = null;
+      userData.avatarUrl = null;
+      userData.emailVerifiedAt = null;
+      userData.deletedAt = null;
+      mockFindFirstData(userData);
+
+      const result = await service.getMyProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.displayName).toBeUndefined();
+      expect(result.name).toBeUndefined();
+      expect(result.phone).toBeUndefined();
+      expect(result.bio).toBeUndefined();
+      expect(result.avatarUrl).toBeUndefined();
+      expect(result.emailVerifiedAt).toBeUndefined();
+      expect(result.deletedAt).toBeUndefined();
+    });
+  });
+
+  describe('updateMyProfile', () => {
+    it('updates allowed fields and returns profile with recalculated stats', async () => {
+      const existingUser = mockUserWithRelations({
+        campaigns: [{ raisedAmount: 750, status: 'ACTIVE' }],
+        donations: [{ amount: 200 }],
+      });
+      existingUser.displayName = 'Original Name';
+      existingUser.bio = 'Original bio';
+
+      const updatedUser = {
+        ...existingUser,
+        displayName: 'Updated Name',
+        bio: 'Updated bio',
+      };
+
+      prisma.user.findFirst
+        .mockResolvedValueOnce(existingUser)
+        .mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValue(updatedUser);
+
+      const result = await service.updateMyProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+        {
+          displayName: 'Updated Name',
+          bio: 'Updated bio',
+        },
+      );
+
+      expect(result.displayName).toBe('Updated Name');
+      expect(result.bio).toBe('Updated bio');
+      expect(result.totalRaised).toBe(750);
+      expect(result.totalDonated).toBe(200);
+      expect(result.campaignCount).toBe(1);
+    });
+
+    it('throws NotFoundException when user does not exist', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.updateMyProfile('UNKNOWN_WALLET', { displayName: 'Test' }),
+      ).rejects.toThrow('User not found');
+    });
+
+    it('throws BadRequestException when new email is already taken', async () => {
+      const existingUser = mockUserWithRelations({
+        campaigns: [],
+        donations: [],
+      });
+      existingUser.email = 'current@example.com';
+      prisma.user.findFirst
+        .mockResolvedValueOnce(existingUser)
+        .mockResolvedValueOnce(null);
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'other-user',
+        email: 'taken@example.com',
+      });
+
+      await expect(
+        service.updateMyProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF', {
+          email: 'taken@example.com',
+        }),
+      ).rejects.toThrow('Email already in use');
+    });
+
+    it('throws BadRequestException when preferences JSON is invalid', async () => {
+      prisma.user.findFirst.mockResolvedValue(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await expect(
+        service.updateMyProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF', {
+          preferences: 'not-valid-json',
+        }),
+      ).rejects.toThrow('Invalid preferences JSON');
+    });
+
+    it('throws BadRequestException when socialLinks JSON is invalid', async () => {
+      prisma.user.findFirst.mockResolvedValue(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await expect(
+        service.updateMyProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF', {
+          socialLinks: 'not-valid-json',
+        }),
+      ).rejects.toThrow('Invalid socialLinks JSON');
+    });
+
+    it('does not check email uniqueness when email is unchanged', async () => {
+      const existingUser = mockUserWithRelations({
+        campaigns: [],
+        donations: [],
+      });
+      existingUser.email = 'same@example.com';
+
+      prisma.user.findFirst
+        .mockResolvedValueOnce(existingUser)
+        .mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValue(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await service.updateMyProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF', {
+        email: 'same@example.com',
+      });
+
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('updates only provided fields preserving existing values', async () => {
+      const existingUser = mockUserWithRelations({
+        campaigns: [],
+        donations: [],
+      });
+      existingUser.displayName = 'Original Name';
+      existingUser.name = 'Original Name';
+
+      prisma.user.findFirst
+        .mockResolvedValueOnce(existingUser)
+        .mockResolvedValueOnce(null);
+      prisma.user.update.mockResolvedValue({
+        ...existingUser,
+        name: 'New Name',
+        campaigns: [],
+        donations: [],
+      });
+
+      await service.updateMyProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF', {
+        name: 'New Name',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            name: 'New Name',
+            displayName: 'Original Name',
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('getPublicProfile', () => {
+    it('returns public profile with campaign stats', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({
+          campaigns: [
+            { raisedAmount: 1000, status: 'ACTIVE' },
+            { raisedAmount: 2000, status: 'ACTIVE' },
+          ],
+          donations: [],
+        }),
+      );
+
+      const result = await service.getPublicProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.displayName).toBe('Profile User');
+      expect(result.avatarUrl).toBe('https://example.com/avatar.png');
+      expect(result.bio).toBe('A test profile user');
+      expect(result.verifiedStatus).toBe(true);
+      expect(result.campaignCount).toBe(2);
+      expect(result.totalRaised).toBe(3000);
+    });
+
+    it('only counts ACTIVE campaigns for public stats', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({
+          campaigns: [
+            { raisedAmount: 5000, status: 'ACTIVE' },
+            { raisedAmount: 500, status: 'DRAFT' },
+          ],
+          donations: [],
+        }),
+      );
+
+      const result = await service.getPublicProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.campaignCount).toBe(1);
+      expect(result.totalRaised).toBe(5000);
+    });
+
+    it('maps kycStatus VERIFIED to verifiedStatus true', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      const result = await service.getPublicProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+      expect(result.verifiedStatus).toBe(true);
+    });
+
+    it('maps kycStatus UNVERIFIED to verifiedStatus false', async () => {
+      const userData = mockUserWithRelations({ campaigns: [], donations: [] });
+      userData.kycStatus = 'UNVERIFIED';
+      mockFindFirstData(userData);
+
+      const result = await service.getPublicProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+      expect(result.verifiedStatus).toBe(false);
+    });
+
+    it('returns undefined optional fields when not set', async () => {
+      const userData = mockUserWithRelations({ campaigns: [], donations: [] });
+      userData.displayName = null;
+      userData.avatarUrl = null;
+      userData.bio = null;
+      mockFindFirstData(userData);
+
+      const result = await service.getPublicProfile(
+        'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      );
+
+      expect(result.displayName).toBeUndefined();
+      expect(result.avatarUrl).toBeUndefined();
+      expect(result.bio).toBeUndefined();
+    });
+
+    it('throws NotFoundException when user is not found', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await expect(service.getPublicProfile('UNKNOWN_WALLET')).rejects.toThrow(
+        'not found',
+      );
+    });
+
+    it('queries with campaigns include filtered to ACTIVE only', async () => {
+      mockFindFirstData(
+        mockUserWithRelations({ campaigns: [], donations: [] }),
+      );
+
+      await service.getPublicProfile('GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: {
+          walletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+          deletedAt: null,
+        },
+        include: {
+          campaigns: { where: { status: 'ACTIVE' } },
+        },
+      });
     });
   });
 });

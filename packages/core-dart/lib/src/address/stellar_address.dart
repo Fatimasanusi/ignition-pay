@@ -4,23 +4,13 @@ import '../exceptions.dart';
 import 'codes.dart';
 import 'detect.dart';
 
-/// An immutable representation of a Stellar Address.
 @immutable
 class StellarAddress {
-  /// The specific kind of address (g, m, or c).
   final AddressKind kind;
-
-  /// The original, encoded string representation of the address.
   final String raw;
-
-  /// The base G... address associated with this address.
-  /// For G-addresses, it matches [raw]. For M-addresses, it is the underlying account.
   final String? baseG;
-
-  /// The 64-bit unsigned integer ID. Only present for M-addresses (muxedId).
   final BigInt? muxedId;
 
-  /// Private internal constructor to enforce immutability.
   const StellarAddress._({
     required this.kind,
     required this.raw,
@@ -28,9 +18,6 @@ class StellarAddress {
     this.muxedId,
   });
 
-  /// Factory constructor that parses a Stellar address string.
-  ///
-  /// Throws [StellarAddressException] for invalid input or length.
   factory StellarAddress.parse(String address) {
     if (address.isEmpty) {
       throw const StellarAddressException('Invalid address');
@@ -84,6 +71,17 @@ class StellarAddress {
     if (detect(address) != expectedKind) {
       throw const StellarAddressException('Invalid address');
     }
+  }
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind.name,
+        'raw': raw,
+        if (baseG != null) 'baseG': baseG,
+        if (muxedId != null) 'muxedId': muxedId.toString(),
+      };
+
+  factory StellarAddress.fromJson(Map<String, dynamic> json) {
+    return StellarAddress.parse(json['raw'] as String);
   }
 
   @override

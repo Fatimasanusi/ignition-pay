@@ -4,6 +4,18 @@ class DecodedMuxedAddress {
 
   const DecodedMuxedAddress({required this.baseG, required this.id});
 
+  Map<String, dynamic> toJson() => {
+        'baseG': baseG,
+        'id': id.toString(),
+      };
+
+  factory DecodedMuxedAddress.fromJson(Map<String, dynamic> json) {
+    return DecodedMuxedAddress(
+      baseG: json['baseG'] as String,
+      id: BigInt.parse(json['id'] as String),
+    );
+  }
+
   @override
   bool operator ==(Object other) =>
       other is DecodedMuxedAddress && other.baseG == baseG && other.id == id;

@@ -1,0 +1,35 @@
+name: Mobile CI
+
+on:
+  pull_request:
+    paths:
+      - "ignition-mobile/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "ignition-mobile/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ignition-mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Analyze Dart code
+        run: dart analyze
+
+      - name: Run Dart tests
+        run: dart test
+
+      - name: Check formatting
+        run: dart format --set-exit-if-changed .

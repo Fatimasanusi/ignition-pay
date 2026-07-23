@@ -1,15 +1,8 @@
-/// Identifies the mechanism used to resolve a routing ID.
 enum RoutingSource {
-  /// The routing ID was extracted directly from a Muxed address (M-address).
   muxed,
-
-  /// The routing ID was extracted from the transaction's MEMO field (ID or TEXT).
   memo,
-
-  /// No routing ID could be resolved.
   none;
 
-  /// Returns a human-friendly description of the routing source.
   String toDisplayString() {
     switch (this) {
       case RoutingSource.muxed:
@@ -22,15 +15,9 @@ enum RoutingSource {
   }
 }
 
-/// Represents a non-blocking notification emitted during routing resolution.
 class RoutingWarning {
-  /// The unique code identifying the warning type.
   final String code;
-
-  /// The severity of the warning (info, warn, error).
   final String severity;
-
-  /// A descriptive message explaining the warning.
   final String message;
 
   const RoutingWarning({
@@ -39,14 +26,26 @@ class RoutingWarning {
     required this.message,
   });
 
-  /// Emitted when a memo is present but ignored because the destination is a muxed address.
+  Map<String, dynamic> toJson() => {
+        'code': code,
+        'severity': severity,
+        'message': message,
+      };
+
+  factory RoutingWarning.fromJson(Map<String, dynamic> json) {
+    return RoutingWarning(
+      code: json['code'] as String,
+      severity: json['severity'] as String,
+      message: json['message'] as String,
+    );
+  }
+
   static const memoIgnored = RoutingWarning(
     code: 'memo-ignored',
     severity: 'info',
     message: 'Memo ignored for muxed address',
   );
 
-  /// Emitted when the transaction sender is detected as a smart contract.
   static const contractSender = RoutingWarning(
     code: 'contract-sender',
     severity: 'info',
@@ -69,18 +68,25 @@ class RoutingWarning {
   int get hashCode => Object.hash(code, severity, message);
 }
 
-/// Details of a terminal error encountered during destination account parsing.
 class DestinationError {
-  /// The [ErrorCode] identifying the failure reason.
   final String code;
-
-  /// A human-readable error message.
   final String message;
 
   DestinationError({required this.code, required this.message});
+
+  Map<String, dynamic> toJson() => {
+        'code': code,
+        'message': message,
+      };
+
+  factory DestinationError.fromJson(Map<String, dynamic> json) {
+    return DestinationError(
+      code: json['code'] as String,
+      message: json['message'] as String,
+    );
+  }
 }
 
-/// Exception thrown when the routing input is fundamentally malformed.
 class ExtractRoutingException implements Exception {
   final String message;
   const ExtractRoutingException(this.message);
@@ -89,18 +95,10 @@ class ExtractRoutingException implements Exception {
   String toString() => 'ExtractRoutingException: $message';
 }
 
-/// The set of parameters required to resolve a deposit route.
 class RoutingInput {
-  /// The destination address (G, M, or C) from the payment operation.
   final String destination;
-
-  /// The type of memo attached to the transaction (none, id, text, hash, return).
   final String memoType;
-
-  /// The raw value of the memo field, if any.
   final String? memoValue;
-
-  /// The source account address of the transaction.
   final String? sourceAccount;
 
   RoutingInput({
@@ -109,27 +107,29 @@ class RoutingInput {
     this.memoValue,
     this.sourceAccount,
   });
+
+  Map<String, dynamic> toJson() => {
+        'destination': destination,
+        'memoType': memoType,
+        if (memoValue != null) 'memoValue': memoValue,
+        if (sourceAccount != null) 'sourceAccount': sourceAccount,
+      };
+
+  factory RoutingInput.fromJson(Map<String, dynamic> json) {
+    return RoutingInput(
+      destination: json['destination'] as String,
+      memoType: json['memoType'] as String,
+      memoValue: json['memoValue'] as String?,
+      sourceAccount: json['sourceAccount'] as String?,
+    );
+  }
 }
 
-/// Immutable result object returned from routing resolution.
-///
-/// Holds the [source] tag indicating how the route was resolved,
-/// an optional numeric [id] extracted from the address or memo,
-/// and any [warnings] emitted during resolution.
 final class RoutingResult {
-  /// The mechanism that successfully resolved the routing ID.
   final RoutingSource source;
-
-  /// The numeric routing identifier (e.g., User ID), or null if none was found.
   final BigInt? id;
-
-  /// A list of non-blocking warnings encountered during resolution.
   final List<RoutingWarning> warnings;
-
-  /// The classic 'G' address of the destination, even if an 'M' address was provided.
   final String? destinationBaseAccount;
-
-  /// Details of the error if the destination address was unparseable.
   final DestinationError? destinationError;
 
   RoutingResult({
@@ -139,6 +139,36 @@ final class RoutingResult {
     this.destinationBaseAccount,
     this.destinationError,
   }) : warnings = List.unmodifiable(warnings ?? const []);
+
+  Map<String, dynamic> toJson() => {
+        'source': source.name,
+        if (id != null) 'id': id.toString(),
+        'warnings': warnings.map((w) => w.toJson()).toList(),
+        if (destinationBaseAccount != null)
+          'destinationBaseAccount': destinationBaseAccount,
+        if (destinationError != null)
+          'destinationError': destinationError!.toJson(),
+      };
+
+  factory RoutingResult.fromJson(Map<String, dynamic> json) {
+    return RoutingResult(
+      source: RoutingSource.values.firstWhere(
+        (e) => e.name == json['source'],
+        orElse: () => RoutingSource.none,
+      ),
+      id: json['id'] != null ? BigInt.parse(json['id'] as String) : null,
+      warnings: (json['warnings'] as List<dynamic>?)
+              ?.map((w) =>
+                  RoutingWarning.fromJson(w as Map<String, dynamic>))
+              .toList() ??
+          [],
+      destinationBaseAccount: json['destinationBaseAccount'] as String?,
+      destinationError: json['destinationError'] != null
+          ? DestinationError.fromJson(
+              json['destinationError'] as Map<String, dynamic>)
+          : null,
+    );
+  }
 
   String toDisplayString() {
     switch (source) {

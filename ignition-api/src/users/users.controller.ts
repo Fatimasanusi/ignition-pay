@@ -8,8 +8,15 @@ import {
   Body,
   UseGuards,
   Request,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -30,24 +37,47 @@ import { UserProfileDto, PublicUserProfileDto } from './dto/user-profile.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AdminGuard } from './guards/admin.guard';
+import { PermissionsService } from '../auth/permissions/permissions.service';
+import { PermissionsGuard } from '../auth/permissions/permissions.guard';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
+import { Permission } from '../auth/permissions/permissions.map';
 
 interface AuthenticatedRequest {
   user: {
     sub?: string;
     userId?: string;
-    walletAddress: string;
+    walletAddress?: string;
   };
 }
 
+/**
+ * Extracts and validates walletAddress from the JWT user payload.
+ * Throws UnauthorizedException if missing or empty (Issue #127).
+ */
+function resolveWalletAddress(req: AuthenticatedRequest): string {
+  const addr = req.user?.walletAddress;
+  if (!addr) {
+    throw new UnauthorizedException('Wallet address not found in token');
+  }
+  return addr;
+}
+
+@ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly permissionsService: PermissionsService,
+  ) {}
 
   /**
    * POST /users/register
    * Register with email + password + walletAddress.
    */
   @Post('register')
+  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Register a new user' })
+  @ApiResponse({ status: 201, description: 'User registered successfully' })
   async register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
     return this.usersService.register(
       dto.email,
@@ -72,7 +102,10 @@ export class UsersController {
    * Authenticate with email + password, returns access and refresh tokens.
    */
   @Post('login')
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Login user' })
+  @ApiResponse({ status: 201, description: 'User logged in successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(@Body() dto: LoginDto): Promise<LoginResponseDto> {
     return this.usersService.login(dto.email, dto.password);
   }
@@ -89,7 +122,7 @@ export class UsersController {
   ): Promise<PasswordActionResponseDto> {
     return this.usersService.setupPassword({
       userId: req.user.sub,
-      walletAddress: req.user.walletAddress,
+      walletAddress: resolveWalletAddress(req),
       password: dto.password,
     });
   }
@@ -106,7 +139,7 @@ export class UsersController {
   ): Promise<PasswordActionResponseDto> {
     return this.usersService.changePassword({
       userId: req.user.sub,
-      walletAddress: req.user.walletAddress,
+      walletAddress: resolveWalletAddress(req),
       currentPassword: dto.currentPassword,
       newPassword: dto.newPassword,
     });
@@ -121,7 +154,17 @@ export class UsersController {
   async getMyProfile(
     @Request() req: AuthenticatedRequest,
   ): Promise<UserProfileDto> {
-    return this.usersService.getMyProfile(req.user.walletAddress);
+    return this.usersService.getMyProfile(resolveWalletAddress(req));
+  }
+
+  /**
+   * GET /users/me/permissions
+   * Returns the permission list for the authenticated user's role.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('me/permissions')
+  getMyPermissions(@Request() req: any): Permission[] {
+    return this.permissionsService.getUserPermissions(req.user.role);
   }
 
   /**
@@ -134,7 +177,10 @@ export class UsersController {
     @Request() req: AuthenticatedRequest,
     @Body() updateDto: UpdateUserDto,
   ): Promise<UserProfileDto> {
-    return this.usersService.updateMyProfile(req.user.walletAddress, updateDto);
+    return this.usersService.updateMyProfile(
+      resolveWalletAddress(req),
+      updateDto,
+    );
   }
 
   /**
@@ -145,7 +191,7 @@ export class UsersController {
   async getProfile(
     @Request() req: AuthenticatedRequest,
   ): Promise<UserProfileDto> {
-    return this.usersService.getMyProfile(req.user.walletAddress);
+    return this.usersService.getMyProfile(resolveWalletAddress(req));
   }
 
   /**
@@ -157,7 +203,10 @@ export class UsersController {
     @Request() req: AuthenticatedRequest,
     @Body() updateDto: UpdateUserDto,
   ): Promise<UserProfileDto> {
-    return this.usersService.updateMyProfile(req.user.walletAddress, updateDto);
+    return this.usersService.updateMyProfile(
+      resolveWalletAddress(req),
+      updateDto,
+    );
   }
 
   /**
@@ -171,6 +220,8 @@ export class UsersController {
   }
 }
 
+@ApiTags('admin/users')
+@ApiBearerAuth('JWT-auth')
 @Controller('admin/users')
 export class AdminUsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -178,8 +229,9 @@ export class AdminUsersController {
   /**
    * PATCH /admin/users/:id/kyc
    */
-  @UseGuards(JwtAuthGuard, AdminGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard, PermissionsGuard)
   @Patch(':id/kyc')
+  @RequirePermissions(Permission.ADMIN_USERS_KYC)
   async updateKYCStatus(
     @Param('id') userId: string,
     @Body() updateDto: UpdateKYCStatusDto,
@@ -188,7 +240,7 @@ export class AdminUsersController {
     return this.usersService.updateKYCStatus(
       userId,
       updateDto.status,
-      req.user.walletAddress,
+      resolveWalletAddress(req),
     );
   }
 
@@ -196,15 +248,17 @@ export class AdminUsersController {
    * PATCH /admin/users/:id/role
    * Update user's role (admin only)
    */
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles(UserRole.ADMIN)
   @Patch(':id/role')
+  @RequirePermissions(Permission.ADMIN_USERS_ROLE)
   async updateUserRole(
     @Param('id') userId: string,
     @Body() updateDto: UpdateUserRoleDto,
     @Request() req: AuthenticatedRequest,
   ): Promise<{ success: boolean; message: string }> {
-    const adminId = req.user.sub || req.user.userId || req.user.walletAddress;
+    const adminId =
+      req.user.sub || req.user.userId || req.user.walletAddress || '';
     return this.usersService.updateUserRole(userId, updateDto.role, adminId);
   }
 }

@@ -7,8 +7,520 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum UserRole {
+  USER
+  DONOR
+  CREATOR
+  ADMIN
+}
+
+enum KycStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  REJECTED
+}
+
+enum DonationStatus {
+  PENDING
+  CONFIRMED
+  REFUNDED
+  FAILED
+}
+
+enum MilestoneStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum NotificationType {
+  CAMPAIGN_CREATED
+  CAMPAIGN_UPDATED
+  DONATION_RECEIVED
+  MILESTONE_REACHED
+  CAMPAIGN_COMPLETED
+  DISPUTE_FILED
+  DISPUTE_RESOLVED
+}
+
+enum DisputeStatus {
+  OPENED
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum AuditActionType {
+  USER_CREATED
+  CAMPAIGN_CREATED
+  CAMPAIGN_UPDATED
+  DONATION_MADE
+  MILESTONE_COMPLETED
+  DISPUTE_FILED
+  ADMIN_ACTION
+}
+
+enum KYCStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum WalletNetwork {
+  STELLAR
+  ETHEREUM
+  BITCOIN
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum AddressStatus {
+  AVAILABLE
+  ALLOCATED
+  RETIRED
+}
+
+enum WalletType {
+  CUSTODIAL
+  NON_CUSTODIAL
+}
+
+enum WalletStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+// ---------------------------------------------------------------------------
+// MODELS: Define all database models with relationships and constraints
+// ---------------------------------------------------------------------------
+
+/// User model representing donors, creators, and administrators
 model User {
-  id        Int      @id @default(autoincrement())
-  username  String   @db.VarChar(50)
-  createdAt DateTime @default(now())
+  id               String    @id @default(uuid())
+  walletAddress    String?   @unique
+  email            String?   @unique
+  passwordHash     String?
+  displayName      String?
+  name             String?
+  phone            String?
+  bio              String?
+  avatarUrl        String?
+  preferences      Json?
+  socialLinks      Json?
+  role             UserRole  @default(USER)
+  kycStatus        KycStatus @default(UNVERIFIED)
+  emailVerifiedAt  DateTime?
+  verifiedStatus   Boolean   @default(false)
+  loginAttempts    Int       @default(0)
+  lockedUntil      DateTime?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  campaigns     Campaign[]     @relation("CampaignCreator")
+  donations     Donation[]
+  updates       Update[]       @relation("UpdateCreator")
+  notifications Notification[]
+  disputes      Dispute[]      @relation("DisputeFiler")
+  newsLetterSub Newsletter?
+  auditLogs     AuditLog[]
+  apiKeys       ApiKey[]
+  passwordHistory PasswordHistory[]
+  emailVerificationTokens EmailVerificationToken[]
+  wallets       Wallet[]
+
+  @@index([email])
+  @@index([role])
+  @@index([isActive])
+  @@index([kycStatus])
+  @@index([deletedAt])
+  // Compound indexes for common filtered lookups
+  @@index([email, deletedAt])
+  @@index([walletAddress, deletedAt])
+  @@index([id, isActive, deletedAt])
+  @@map("users")
+}
+
+/// PasswordHistory model for preventing recent password reuse
+model PasswordHistory {
+  id           String   @id @default(uuid())
+  userId       String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_history")
+}
+
+/// ApiKey model for third-party integrations
+model ApiKey {
+  id             String    @id @default(uuid())
+  userId         String
+  name           String
+  keyHash        String    @unique
+  prefix         String
+  isActive       Boolean   @default(true)
+  scope          String    @default("read")
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([prefix, isActive])
+  @@index([userId])
+  @@index([isActive, expiresAt])
+  // Covering index for the guard's findUnique(keyHash, isActive) lookup
+  @@index([keyHash, isActive])
+  @@map("api_keys")
+}
+
+/// Campaign model representing fundraising campaigns
+model Campaign {
+  id           String         @id @default(uuid())
+  title        String
+  description  String
+  goalAmount   Decimal        @db.Decimal(20, 7)
+  raisedAmount Decimal        @default(0) @db.Decimal(20, 7)
+  status       CampaignStatus @default(DRAFT)
+  creatorId    String
+  startDate    DateTime?
+  endDate      DateTime?
+  imageUrl     String?
+  category     String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  // Relations
+  creator    User        @relation("CampaignCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  donations  Donation[]
+  milestones Milestone[]
+  updates    Update[]
+  disputes   Dispute[]
+
+  @@index([creatorId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([category])
+  // Compound index to support updateCampaign's status-filtered findUnique
+  @@index([id, status])
+  @@map("campaigns")
+}
+
+/// Donation model representing individual donations to campaigns
+model Donation {
+  id          String         @id @default(uuid())
+  amount      Decimal        @db.Decimal(20, 7)
+  assetCode   String         @default("XLM")
+  txHash      String?        @unique
+  status      DonationStatus @default(PENDING)
+  donorId     String
+  campaignId  String
+  donatedAt   DateTime       @default(now())
+  confirmedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Relations
+  donor    User      @relation(fields: [donorId], references: [id], onDelete: Cascade)
+  campaign Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  disputes Dispute[]
+
+  @@unique([donorId, campaignId, txHash])
+  @@index([donorId])
+  @@index([campaignId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("donations")
+}
+
+/// Milestone model representing campaign milestones
+model Milestone {
+  id           String          @id @default(uuid())
+  campaignId   String
+  title        String
+  description  String?
+  targetAmount Decimal         @db.Decimal(20, 7)
+  status       MilestoneStatus @default(PENDING)
+  dueDate      DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  // Relations
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("milestones")
+}
+
+/// Update model representing campaign progress updates
+model Update {
+  id         String   @id @default(uuid())
+  campaignId String
+  creatorId  String
+  title      String
+  content    String
+  imageUrl   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator  User     @relation("UpdateCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([creatorId])
+  @@index([createdAt])
+  @@map("updates")
+}
+
+/// Notification model for user notifications
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  relatedId String? // ID of related resource (campaign, donation, etc.)
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Dispute model for handling donation disputes
+model Dispute {
+  id          String        @id @default(uuid())
+  donationId  String
+  filerId     String
+  campaignId  String
+  reason      String
+  description String
+  status      DisputeStatus @default(OPENED)
+  resolution  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  donation Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
+  filer    User     @relation("DisputeFiler", fields: [filerId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([donationId])
+  @@index([filerId])
+  @@index([campaignId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("disputes")
+}
+
+/// Newsletter model for newsletter subscriptions
+model Newsletter {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  email          String    @unique
+  isSubscribed   Boolean   @default(true)
+  subscribedAt   DateTime  @default(now())
+  unsubscribedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([isSubscribed])
+  @@map("newsletters")
+}
+
+/// AuditLog model for tracking system actions
+model EmailVerificationToken {
+  id         String   @id @default(uuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  // Compound index to support confirmEmail's filtered findUnique(tokenHash, usedAt, expiresAt)
+  @@index([tokenHash, usedAt, expiresAt])
+  @@map("email_verification_tokens")
+}
+
+/// AuditLog model for tracking system actions
+model AuditLog {
+  id           String          @id @default(uuid())
+  userId       String?
+  action       AuditActionType
+  resourceType String
+  resourceId   String
+  details      String? // JSON stringified details
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime        @default(now())
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// Wallet model representing a user's custodial wallet with deposit address and limits
+model Wallet {
+  id              String        @id @default(uuid())
+  userId          String
+  network         WalletNetwork @default(STELLAR)
+  depositAddress  String        @unique
+  label           String?
+  balance         Decimal       @default(0) @db.Decimal(20, 7)
+  currency        String        @default("USD")
+  walletType      WalletType    @default(CUSTODIAL)
+  status          WalletStatus  @default(ACTIVE)
+  dailyLimit      Decimal       @default(1000) @db.Decimal(20, 7)
+  monthlyLimit    Decimal       @default(10000) @db.Decimal(20, 7)
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  addresses        Address[]
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  depositAddresses DepositAddress[]
+  outgoingTransactions  Transaction[] @relation("OutgoingTransactions")
+  incomingTransactions  Transaction[] @relation("IncomingTransactions")
+
+  @@index([userId])
+  @@index([depositAddress])
+  @@index([network])
+  @@index([status])
+  // Compound indexes for id+isActive guard lookups (addresses service, wallets service)
+  @@index([id, isActive])
+  @@index([userId, isActive])
+  @@map("wallets")
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  
+  fromWalletId    String            @map("from_wallet_id")
+  fromWallet      Wallet            @relation("OutgoingTransactions", fields: [fromWalletId], references: [id])
+  
+  toWalletId      String            @map("to_wallet_id")
+  toWallet        Wallet            @relation("IncomingTransactions", fields: [toWalletId], references: [id])
+  
+  amount          Decimal           @db.Decimal(20, 7)
+  assetCode       String            @default("XLM")    @map("asset_code")
+  assetIssuer     String?           @map("asset_issuer")
+  status          TransactionStatus @default(PENDING)
+  
+  feeAmount       Decimal           @default(0) @db.Decimal(20, 7) @map("fee_amount")
+  feeAssetCode    String            @default("XLM") @map("fee_asset_code")
+  
+  stellarTxHash   String?           @unique @map("stellar_tx_hash")
+  metadata        Json?
+  
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt      @map("updated_at")
+  statusUpdatedAt DateTime?         @map("status_updated_at")
+  createdBy       String?           @map("created_by")
+  ipAddress       String?           @map("ip_address")
+  userAgent       String?           @map("user_agent")
+
+  @@index([fromWalletId])
+  @@index([toWalletId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([stellarTxHash])
+  
+  @@map("transactions")
+}
+
+/// Address model for deposit address management with allocation tracking
+model Address {
+  id             String        @id @default(uuid())
+  walletId       String?
+  address        String        @unique
+  network        WalletNetwork @default(STELLAR)
+  label          String?
+  isActive       Boolean       @default(true)
+  allocatedAt    DateTime?
+  lastActivityAt DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Relations
+  wallet Wallet? @relation(fields: [walletId], references: [id], onDelete: SetNull)
+
+  @@index([walletId])
+  @@index([address])
+  @@index([network])
+  @@index([isActive])
+  @@index([allocatedAt])
+  @@index([lastActivityAt])
+  // Compound indexes for stricter findUnique(address, isActive) and findUnique(id, isActive) queries
+  @@index([address, isActive])
+  @@index([id, isActive])
+  @@map("addresses")
+}
+
+/// DepositAddress model for tracking generated deposit addresses associated with wallets
+model DepositAddress {
+  id          String        @id @default(uuid())
+  address     String        @unique
+  walletId    String
+  network     WalletNetwork @default(STELLAR)
+  status      AddressStatus @default(ALLOCATED)
+  label       String?
+  allocatedAt DateTime      @default(now())
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId])
+  @@index([status])
+  @@index([network])
+  @@map("deposit_addresses")
 }

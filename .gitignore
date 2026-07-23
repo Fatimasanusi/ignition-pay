@@ -1,5 +1,36 @@
-node_modules/
+node_modules
 __pycache__/
 build/
 backups/
 *.dump
+
+# Local environment files (per-package .gitignore also covers these)
+.env
+.env.*
+!.env.example
+
+# Docker Compose local overrides
+compose.override.yml
+compose.override.yaml
+
+# Dart
+.dart_tool/
+.pub/
+build/
+*.packages
+.packages
+
+# Flutter
+.idea/
+*.iml
+*.lock
+android/.gradle/
+android/local.properties
+ios/Pods/
+ios/.symlinks/
+Flutter/
+.metadata
+
+# IDE
+.vscode/
+.DS_Store

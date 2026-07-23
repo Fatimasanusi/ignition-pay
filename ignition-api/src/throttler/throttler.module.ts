@@ -13,8 +13,13 @@ import { ThrottlerRedisStorage } from './throttler-redis.storage';
         throttlers: [
           {
             name: 'default',
-            ttl: 60_000,
-            limit: 100,
+            ttl: config.get<number>('THROTTLE_DEFAULT_TTL', 60_000),
+            limit: config.get<number>('THROTTLE_DEFAULT_LIMIT', 100),
+          },
+          {
+            name: 'strict',
+            ttl: config.get<number>('THROTTLE_STRICT_TTL', 60_000),
+            limit: config.get<number>('THROTTLE_STRICT_LIMIT', 5),
           },
         ],
         storage: new ThrottlerRedisStorage(config),
