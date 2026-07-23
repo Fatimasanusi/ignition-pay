@@ -27,11 +27,32 @@ func normalizeUnsupportedMemoType(memoType string) string {
 	}
 }
 
-// ExtractRouting identifies the deposit routing destination and identifier from a Stellar 
-// payment input. It implements the standard priority policy where M-address identifiers 
-// take precedence over any provided memo. Returns a RoutingResult with the decoded 
+// ExtractRouting identifies the deposit routing destination and identifier from a Stellar
+// payment input. It implements the standard priority policy where M-address identifiers
+// take precedence over any provided memo. Returns a RoutingResult with the decoded
 // state and applicable warnings.
+//
+// Pass a non-nil Flags field inside input with ExperimentalRouting set to true to opt in
+// to the experimental multi-chain routing path.
 func ExtractRouting(input RoutingInput) RoutingResult {
+	flags := ResolveFlags(input.Flags)
+	if flags.ExperimentalRouting {
+		return extractRoutingExperimental(input)
+	}
+	return extractRoutingStable(input)
+}
+
+// extractRoutingExperimental is a placeholder for the upcoming multi-chain routing model.
+// It currently delegates to the stable implementation so the flag is wired up and
+// testable without any behavioural change until the new model is ready.
+func extractRoutingExperimental(input RoutingInput) RoutingResult {
+	// TODO: replace with multi-chain resolution logic when the new routing
+	// model is stabilised.
+	return extractRoutingStable(input)
+}
+
+// extractRoutingStable is the current production routing path.
+func extractRoutingStable(input RoutingInput) RoutingResult {
 	if input.SourceAccount != "" {
 		source, err := address.Parse(input.SourceAccount)
 		if err == nil && source.Kind == address.KindC {
