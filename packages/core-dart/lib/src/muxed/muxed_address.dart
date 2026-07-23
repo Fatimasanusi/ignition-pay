@@ -18,7 +18,7 @@ import 'encode.dart';
 /// apply appropriate conversion logic to maintain full 64-bit range correctness.
 ///
 /// For Flutter web guidance and BigInt caveats, see
-/// [flutter-web-bigint.md](../../../../docs/guides/flutter-web-bigint.md).
+/// [flutter-web-bigint.mdx](../../../../docs/guides/flutter-web-bigint.mdx).
 class MuxedAddress {
   static String encode({required String baseG, required BigInt id}) {
     final uint64Max = BigInt.parse('18446744073709551615');
