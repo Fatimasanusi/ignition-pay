@@ -21,7 +21,7 @@
     "@stellar/stellar-sdk": ">=10.0.0"
   },
   "devDependencies": {
-    "@stellar-address-kit/spec": "workspace:*",
+    "@stellar-address-kit/spec": "file:../spec",
     "@stellar/stellar-sdk": "^12.3.0",
     "eslint": "^8.56.0",
     "tsup": "^8.0.1",
