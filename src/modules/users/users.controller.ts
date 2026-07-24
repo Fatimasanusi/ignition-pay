@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Controller('users')
 export class UsersController {
@@ -34,5 +35,13 @@ export class UsersController {
   @Patch(':id/restore')
   async restore(@Param('id', ParseUUIDPipe) id: string): Promise<User> {
     return this.usersService.restoreUser(id);
+  }
+
+  @Patch('profile/:id')
+  async updateProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateUserDto: UpdateUserDto,
+  ): Promise<User> {
+    return this.usersService.updateProfile(id, updateUserDto);
   }
 }
