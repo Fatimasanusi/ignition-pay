@@ -198,9 +198,7 @@ export class UsersService {
   /**
    * Get public profile for a user by wallet address
    */
-  async getPublicProfile(
-    walletAddress: string,
-  ): Promise<PublicUserProfileDto> {
+  async getPublicProfile(walletAddress: string): Promise<PublicUserProfileDto> {
     const user = await this.prisma.user.findFirst({
       where: { walletAddress, deletedAt: null },
       include: {
@@ -276,6 +274,12 @@ export class UsersService {
 
   /**
    * Login with email + password, returning JWT access and refresh tokens.
+   *
+   * Implements the account-lockout flow (Issue #232): after
+   * `LOGIN_MAX_ATTEMPTS` consecutive failures, the account is locked
+   * for `LOGIN_LOCKOUT_SECONDS` seconds, and subsequent logins are
+   * rejected with a structured `UnauthorizedException` that surfaces
+   * `retryAfterSeconds` so clients can show a clear unlock countdown.
    */
   async login(email: string, password: string): Promise<LoginResponseDto> {
     const maxAttempts = this.config.get<number>('LOGIN_MAX_ATTEMPTS', 5);
@@ -296,9 +300,10 @@ export class UsersService {
       const retryAfter = Math.ceil(
         (user.lockedUntil.getTime() - Date.now()) / 1000,
       );
-      throw new UnauthorizedException(
-        `Account locked. Try again in ${retryAfter}s`,
-      );
+      throw new UnauthorizedException({
+        message: `Account locked. Try again in ${retryAfter}s`,
+        retryAfterSeconds: Math.max(retryAfter, 1),
+      });
     }
 
     if (!user.passwordHash) {
@@ -309,10 +314,10 @@ export class UsersService {
 
     if (!valid) {
       const attempts = user.loginAttempts + 1;
-      const lockedUntil =
-        attempts >= maxAttempts
-          ? new Date(Date.now() + lockoutSeconds * 1000)
-          : null;
+      const reachedThreshold = attempts >= maxAttempts;
+      const lockedUntil = reachedThreshold
+        ? new Date(Date.now() + lockoutSeconds * 1000)
+        : null;
 
       await this.prisma.user.update({
         where: { id: user.id },
@@ -334,7 +339,10 @@ export class UsersService {
       role: user.role,
     });
 
-    const accessTtlSeconds = this.config.get<number>('SESSION_ACCESS_TTL_SECONDS', 900);
+    const accessTtlSeconds = this.config.get<number>(
+      'SESSION_ACCESS_TTL_SECONDS',
+      900,
+    );
 
     const accessToken = this.jwt.sign(
       {
@@ -345,12 +353,18 @@ export class UsersService {
         sid: session.sessionId,
       },
       {
-        secret: this.config.get<string>('JWT_SECRET', 'stellaraid-default-secret'),
+        secret: this.config.get<string>(
+          'JWT_SECRET',
+          'stellaraid-default-secret',
+        ),
         expiresIn: `${accessTtlSeconds}s`,
       },
     );
 
-    const sessionTtlSeconds = this.config.get<number>('SESSION_TTL_SECONDS', 604800);
+    const sessionTtlSeconds = this.config.get<number>(
+      'SESSION_TTL_SECONDS',
+      604800,
+    );
 
     const refreshToken = this.jwt.sign(
       { sub: user.id, sid: session.sessionId },
@@ -725,6 +739,58 @@ export class UsersService {
   }
 
   /**
+   * Admin-only: clear `loginAttempts` and `lockedUntil` for a user so
+   * they can log in again. This is the manual "unlock" surface for
+   * Issue #232 — typically used after a user proves ownership of the
+   * account out-of-band (support ticket, email confirmation, etc.).
+   */
+  async unlockUser(
+    userId: string,
+    adminId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    await this.verifyAdminRole(adminId);
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.loginAttempts === 0 && !user.lockedUntil) {
+      return {
+        success: true,
+        message: 'User account is not locked',
+      };
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { loginAttempts: 0, lockedUntil: null },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: adminId,
+        action: 'ADMIN_ACTION',
+        resourceType: 'User',
+        resourceId: userId,
+        details: JSON.stringify({
+          action: 'ACCOUNT_UNLOCK',
+          previousLoginAttempts: user.loginAttempts,
+          previousLockedUntil: user.lockedUntil?.toISOString() ?? null,
+        }),
+      },
+    });
+
+    return {
+      success: true,
+      message: 'User account unlocked successfully',
+    };
+  }
+
+  /**
    * Verify that the user has ADMIN role
    * @param adminId - User ID or wallet address to verify
    * @throws ForbiddenException if user is not an admin
@@ -732,10 +798,7 @@ export class UsersService {
   private async verifyAdminRole(adminId: string): Promise<void> {
     const admin = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { id: adminId },
-          { walletAddress: adminId },
-        ],
+        OR: [{ id: adminId }, { walletAddress: adminId }],
         deletedAt: null,
       },
     });
