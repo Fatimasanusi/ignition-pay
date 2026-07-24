@@ -11,6 +11,14 @@ import { AddressResponseDto } from './dto/address-response.dto';
 import StellarSdk from '@stellar/stellar-sdk';
 import { GenerateAddressDto } from './dto/generate-address.dto';
 import { WalletNetwork } from '../wallets/dto/create-wallet.dto';
+import { GenerateMemoDto, MemoTypeOption } from './dto/generate-memo.dto';
+import { ValidateMemoDto } from './dto/validate-memo.dto';
+import { ResolveDepositDto } from './dto/resolve-deposit.dto';
+import {
+  extractRouting,
+  validateMemo as validateStellarMemo,
+  generateMemo as generateStellarMemo,
+} from 'stellar-address-kit';
 
 @Injectable()
 export class AddressesService {
@@ -200,5 +208,132 @@ export class AddressesService {
       where: { walletId },
       orderBy: { allocatedAt: 'desc' },
     });
+  }
+
+  /**
+   * Generates a memo (id, text, or hash) for a user wallet deposit.
+   */
+  async generateMemo(userId: string, dto: GenerateMemoDto) {
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { id: dto.walletId, isActive: true },
+    });
+    if (!wallet || wallet.userId !== userId) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    const memoType = dto.memoType ?? MemoTypeOption.ID;
+    let seedValue = dto.customValue ?? wallet.id;
+
+    if (memoType === MemoTypeOption.ID && !/^\d+$/.test(seedValue)) {
+      // Convert string seed (e.g. UUID) into a deterministic uint64 numeric string
+      let hash = BigInt(0);
+      for (let i = 0; i < seedValue.length; i++) {
+        hash = (hash * BigInt(31) + BigInt(seedValue.charCodeAt(i))) % BigInt('18446744073709551615');
+      }
+      seedValue = hash.toString();
+    }
+
+    try {
+      const generated = generateStellarMemo(memoType, seedValue);
+      return {
+        walletId: wallet.id,
+        depositAddress: wallet.depositAddress,
+        memoType: generated.type,
+        memoValue: generated.value,
+      };
+    } catch (err: any) {
+      throw new BadRequestException(
+        err?.message ?? 'Failed to generate deposit memo',
+      );
+    }
+  }
+
+  /**
+   * Validates format and routability of a deposit memo.
+   */
+  async validateMemo(dto: ValidateMemoDto) {
+    const memoType = dto.memoType || 'none';
+    const memoValue = dto.memoValue ?? null;
+
+    const valResult = validateStellarMemo(memoType, memoValue);
+
+    let routingResult: any = null;
+    if (dto.destination) {
+      try {
+        routingResult = extractRouting({
+          destination: dto.destination,
+          memoType,
+          memoValue,
+          sourceAccount: null,
+        });
+      } catch (err: any) {
+        valResult.warnings.push({
+          code: 'INVALID_DESTINATION' as any,
+          severity: 'error',
+          message: err?.message ?? 'Invalid destination address',
+        });
+      }
+    }
+
+    return {
+      valid: valResult.valid,
+      memoType,
+      memoValue,
+      normalizedValue: valResult.normalizedValue,
+      routingId: routingResult?.routingId?.toString() ?? valResult.normalizedValue,
+      error: valResult.error,
+      warnings: [
+        ...valResult.warnings,
+        ...(routingResult?.warnings ?? []),
+      ],
+    };
+  }
+
+  /**
+   * Resolves deposit attribution from destination address + memo to the matching user/wallet.
+   */
+  async resolveDeposit(dto: ResolveDepositDto) {
+    const memoType = dto.memoType ?? 'none';
+    const memoValue = dto.memoValue ?? null;
+
+    let routing: any;
+    try {
+      routing = extractRouting({
+        destination: dto.destination,
+        memoType,
+        memoValue,
+        sourceAccount: null,
+      });
+    } catch (err: any) {
+      throw new BadRequestException(err?.message ?? 'Invalid destination address for routing');
+    }
+
+    const targetAccount = routing.destinationBaseAccount ?? dto.destination;
+
+    // Search wallet directly by depositAddress
+    let wallet = await this.prisma.wallet.findUnique({
+      where: { depositAddress: targetAccount },
+    });
+
+    // If not found directly, search in DepositAddress table
+    if (!wallet) {
+      const depositAddrRecord = await this.prisma.depositAddress.findUnique({
+        where: { address: targetAccount },
+        include: { wallet: true },
+      });
+      if (depositAddrRecord) {
+        wallet = depositAddrRecord.wallet;
+      }
+    }
+
+    return {
+      routed: !!wallet,
+      destinationBaseAccount: routing.destinationBaseAccount,
+      routingId: routing.routingId?.toString() ?? null,
+      routingSource: routing.routingSource,
+      walletId: wallet?.id ?? null,
+      userId: wallet?.userId ?? null,
+      warnings: routing.warnings,
+    };
   }
 }
