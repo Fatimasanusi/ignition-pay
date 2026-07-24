@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerRedisStorage } from './throttler-redis.storage';
+import { ThrottlerBehindProxyGuard } from './throttler-behind-proxy.guard';
 
 @Module({
   imports: [
@@ -29,7 +30,7 @@ import { ThrottlerRedisStorage } from './throttler-redis.storage';
   providers: [
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: ThrottlerBehindProxyGuard,
     },
   ],
   exports: [ThrottlerModule],

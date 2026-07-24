@@ -9,7 +9,6 @@ import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
 import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import {
-  ApiBody,
   ApiOperation,
   ApiProperty,
   ApiResponse,
@@ -23,7 +22,6 @@ import { AuthChallengeService } from './auth-challenge.service';
 import { buildChallengePrefix, resolveHomeDomain } from './auth-home-domain';
 import { SessionService } from '../session/session.service';
 import { AuthTokenService } from './auth-token.service';
-import { LoginResponseDto } from '../users/dto/login.dto';
 
 export class VerifyDto {
   @ApiProperty({ example: 'G...wallet-address' })
@@ -74,7 +72,16 @@ export class AuthResponse {
  */
 @ApiTags('auth')
 @Controller('auth')
-@Throttle({ strict: { limit: 5, ttl: 60_000 } })
+@Throttle({
+  strict: {
+    limit: process.env.THROTTLE_STRICT_LIMIT
+      ? Number(process.env.THROTTLE_STRICT_LIMIT)
+      : 5,
+    ttl: process.env.THROTTLE_STRICT_TTL
+      ? Number(process.env.THROTTLE_STRICT_TTL)
+      : 60_000,
+  },
+})
 export class AuthVerifyController {
   constructor(
     private readonly prisma: PrismaService,

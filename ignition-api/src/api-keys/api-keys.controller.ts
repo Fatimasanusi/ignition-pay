@@ -41,7 +41,16 @@ export class ApiKeysController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Post()
-  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
   @ApiOperation({ summary: 'Create a new API key' })
   @ApiResponse({ status: 201, description: 'API key successfully created' })
   async create(@Req() req: Request & { user: JwtUser }) {
@@ -199,7 +208,16 @@ export class ApiKeysController {
   }
 
   @Post(':id/rotate')
-  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
   @ApiOperation({ summary: 'Rotate an API key (create new, revoke old)' })
   @ApiResponse({ status: 200, description: 'API key rotated successfully' })
   @ApiResponse({ status: 404, description: 'API key not found' })
@@ -251,7 +269,16 @@ export class ApiKeysController {
   }
 
   @Delete(':id')
-  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
   @ApiOperation({ summary: 'Revoke an API key' })
   @ApiResponse({ status: 200, description: 'API key successfully revoked' })
   @ApiResponse({ status: 404, description: 'API key not found' })
