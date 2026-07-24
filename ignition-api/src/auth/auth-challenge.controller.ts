@@ -1,8 +1,10 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseFilters } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiProperty } from '@nestjs/swagger';
 import { ChallengeQueryDto } from './dto/challenge-query.dto';
 import { AuthChallengeService } from './auth-challenge.service';
+import { AuthExceptionFilter } from './filters/auth-exception.filter';
+import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 
 /**
  * Issue #225 — the challenge response now includes `expiresAt` so clients
@@ -21,16 +23,8 @@ class ChallengeResponse {
 
 @ApiTags('auth')
 @Controller('auth')
-@Throttle({
-  strict: {
-    limit: process.env.THROTTLE_STRICT_LIMIT
-      ? Number(process.env.THROTTLE_STRICT_LIMIT)
-      : 5,
-    ttl: process.env.THROTTLE_STRICT_TTL
-      ? Number(process.env.THROTTLE_STRICT_TTL)
-      : 60_000,
-  },
-})
+@UseFilters(AuthExceptionFilter)
+@Throttle({ strict: { limit: 5, ttl: 60_000 } })
 export class AuthChallengeController {
   constructor(private readonly challengeService: AuthChallengeService) {}
 
@@ -43,8 +37,12 @@ export class AuthChallengeController {
    */
   @Get('challenge')
   @ApiOperation({ summary: 'Get authentication challenge for wallet address' })
-  @ApiResponse({ status: 200, description: 'Returns challenge string and expiry', type: ChallengeResponse })
-  @ApiResponse({ status: 400, description: 'Invalid Stellar wallet address' })
+  @ApiResponse({ status: 200, description: 'Returns challenge string' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid Stellar wallet address',
+    type: AuthErrorResponseDto,
+  })
   async getChallenge(
     @Query() query: ChallengeQueryDto,
   ): Promise<ChallengeResponse> {

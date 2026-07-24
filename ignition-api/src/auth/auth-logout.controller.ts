@@ -5,6 +5,7 @@ import {
   Post,
   Req,
   UnauthorizedException,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -19,6 +20,8 @@ import { SessionGuard } from '../session/session.guard';
 import type { AuthenticatedRequest } from '../session/session.guard';
 import { SessionService } from '../session/session.service';
 import { AuthTokenService } from './auth-token.service';
+import { AuthExceptionFilter } from './filters/auth-exception.filter';
+import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 
 interface LogoutResponse {
   message: string;
@@ -36,16 +39,8 @@ interface LogoutResponse {
  */
 @ApiTags('auth')
 @Controller('auth')
-@Throttle({
-  strict: {
-    limit: process.env.THROTTLE_STRICT_LIMIT
-      ? Number(process.env.THROTTLE_STRICT_LIMIT)
-      : 5,
-    ttl: process.env.THROTTLE_STRICT_TTL
-      ? Number(process.env.THROTTLE_STRICT_TTL)
-      : 60_000,
-  },
-})
+@UseFilters(AuthExceptionFilter)
+@Throttle({ strict: { limit: 5, ttl: 60_000 } })
 export class AuthLogoutController {
   constructor(
     private readonly sessionService: SessionService,
@@ -66,6 +61,7 @@ export class AuthLogoutController {
   @ApiResponse({
     status: HttpStatus.UNAUTHORIZED,
     description: 'Invalid or missing access token',
+    type: AuthErrorResponseDto,
   })
   async logout(@Req() req: AuthenticatedRequest): Promise<LogoutResponse> {
     if (!req.user) {

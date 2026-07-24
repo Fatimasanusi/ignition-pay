@@ -4,6 +4,7 @@ import {
   Controller,
   Post,
   UnauthorizedException,
+  UseFilters,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
@@ -22,6 +23,9 @@ import { AuthChallengeService } from './auth-challenge.service';
 import { buildChallengePrefix, resolveHomeDomain } from './auth-home-domain';
 import { SessionService } from '../session/session.service';
 import { AuthTokenService } from './auth-token.service';
+import { LoginResponseDto } from '../users/dto/login.dto';
+import { AuthExceptionFilter } from './filters/auth-exception.filter';
+import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 
 export class VerifyDto {
   @ApiProperty({ example: 'G...wallet-address' })
@@ -72,16 +76,8 @@ export class AuthResponse {
  */
 @ApiTags('auth')
 @Controller('auth')
-@Throttle({
-  strict: {
-    limit: process.env.THROTTLE_STRICT_LIMIT
-      ? Number(process.env.THROTTLE_STRICT_LIMIT)
-      : 5,
-    ttl: process.env.THROTTLE_STRICT_TTL
-      ? Number(process.env.THROTTLE_STRICT_TTL)
-      : 60_000,
-  },
-})
+@UseFilters(AuthExceptionFilter)
+@Throttle({ strict: { limit: 5, ttl: 60_000 } })
 export class AuthVerifyController {
   constructor(
     private readonly prisma: PrismaService,
@@ -131,8 +127,16 @@ export class AuthVerifyController {
     description: 'Successful login',
     type: AuthResponse,
   })
-  @ApiResponse({ status: 400, description: 'Invalid payload' })
-  @ApiResponse({ status: 401, description: 'Signature verification failed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid payload',
+    type: AuthErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Signature verification failed',
+    type: AuthErrorResponseDto,
+  })
   async verify(@Body() dto: VerifyDto): Promise<AuthResponse> {
     const { walletAddress, signedChallenge, challenge } = dto;
 

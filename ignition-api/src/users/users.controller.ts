@@ -6,6 +6,7 @@ import {
   Post,
   Param,
   Body,
+  UseFilters,
   UseGuards,
   Request,
   UnauthorizedException,
@@ -41,6 +42,8 @@ import { PermissionsService } from '../auth/permissions/permissions.service';
 import { PermissionsGuard } from '../auth/permissions/permissions.guard';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { Permission } from '../auth/permissions/permissions.map';
+import { AuthExceptionFilter } from '../auth/filters/auth-exception.filter';
+import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 
 interface AuthenticatedRequest {
   user: {
@@ -109,21 +112,19 @@ export class UsersController {
   /**
    * POST /users/login
    * Authenticate with email + password, returns access and refresh tokens.
+   * Applies the auth error filter (Issue #229) so 400/401/503 responses
+   * share the same canonical envelope as `/auth/*`.
    */
   @Post('login')
-  @Throttle({
-    strict: {
-      limit: process.env.THROTTLE_STRICT_LIMIT
-        ? Number(process.env.THROTTLE_STRICT_LIMIT)
-        : 5,
-      ttl: process.env.THROTTLE_STRICT_TTL
-        ? Number(process.env.THROTTLE_STRICT_TTL)
-        : 60_000,
-    },
-  })
+  @UseFilters(AuthExceptionFilter)
+  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Login user' })
   @ApiResponse({ status: 201, description: 'User logged in successfully' })
-  @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid credentials or account locked',
+    type: AuthErrorResponseDto,
+  })
   async login(@Body() dto: LoginDto): Promise<LoginResponseDto> {
     return this.usersService.login(dto.email, dto.password);
   }
@@ -278,5 +279,22 @@ export class AdminUsersController {
     const adminId =
       req.user.sub || req.user.userId || req.user.walletAddress || '';
     return this.usersService.updateUserRole(userId, updateDto.role, adminId);
+  }
+
+  /**
+   * PATCH /admin/users/:id/unlock
+   * Manually unlock an account locked by the failed-login policy
+   * (Issue #232). Resets loginAttempts to 0 and clears lockedUntil.
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/unlock')
+  @RequirePermissions(Permission.ADMIN_USERS_ROLE)
+  async unlockUser(
+    @Param('id') userId: string,
+    @Request() req: AuthenticatedRequest,
+  ): Promise<{ success: boolean; message: string }> {
+    const adminId = req.user.sub || req.user.userId || req.user.walletAddress;
+    return this.usersService.unlockUser(userId, adminId);
   }
 }

@@ -1,4 +1,9 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -241,7 +246,9 @@ describe('UsersService login', () => {
       findUnique: jest.Mock;
       findFirst: jest.Mock;
       update: jest.Mock;
+      auditLogs?: { create?: jest.Mock };
     };
+    auditLog?: { create: jest.Mock };
   };
   let cache: { set: jest.Mock };
   let service: UsersService;
@@ -251,9 +258,10 @@ describe('UsersService login', () => {
       user: {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
-        findFirst: jest.fn(),
         update: jest.fn(),
+        auditLogs: { create: jest.fn() },
       },
+      auditLog: { create: jest.fn() },
     };
     cache = {
       set: jest.fn(),
@@ -267,6 +275,8 @@ describe('UsersService login', () => {
       new ConfigService({
         JWT_SECRET: 'test-secret',
         REFRESH_TOKEN_SECRET: 'test-refresh-secret',
+        LOGIN_MAX_ATTEMPTS: '5',
+        LOGIN_LOCKOUT_SECONDS: '900',
       }),
       cache as unknown as Keyv,
       {
@@ -277,27 +287,259 @@ describe('UsersService login', () => {
     );
   });
 
-  it('stores refresh token in Redis on successful login', async () => {
-    const mockUser = {
-      id: 'user-123',
-      walletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
-      email: 'test@example.com',
-      passwordHash: 'hashed-password',
-      role: 'USER',
-      loginAttempts: 0,
-      lockedUntil: null,
-    };
+  const mkUser = (overrides: Partial<{
+    id: string;
+    walletAddress: string;
+    email: string;
+    passwordHash: string | null;
+    role: string;
+    loginAttempts: number;
+    lockedUntil: Date | null;
+  }> = {}) => ({
+    id: 'user-123',
+    walletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+    email: 'test@example.com',
+    passwordHash: 'hashed-password',
+    role: 'USER',
+    loginAttempts: 0,
+    lockedUntil: null,
+    ...overrides,
+  });
 
-    prisma.user.findFirst.mockResolvedValue(mockUser);
-    prisma.user.update.mockResolvedValue({});
+  it('stores refresh token in Redis on successful login', async () => {
+    (prisma.user.findFirst as jest.Mock).mockResolvedValue(mkUser());
+    (prisma.user.update as jest.Mock).mockResolvedValue({});
     bcryptMock.compare.mockResolvedValueOnce(true as never);
 
     await service.login('test@example.com', 'password123');
 
     expect(cache.set).toHaveBeenCalledWith(
-      `refresh:${mockUser.walletAddress}`,
+      `refresh:${mkUser().walletAddress}`,
       expect.any(String),
       7 * 24 * 60 * 60 * 1000,
+    );
+  });
+
+  it('resets loginAttempts and lockedUntil on successful login (Issue #232)', async () => {
+    const user = mkUser({ loginAttempts: 3, lockedUntil: new Date(Date.now() - 1) });
+    (prisma.user.findFirst as jest.Mock).mockResolvedValue(user);
+    (prisma.user.update as jest.Mock).mockResolvedValue({});
+    bcryptMock.compare.mockResolvedValueOnce(true as never);
+
+    await service.login(user.email, 'good-password');
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: user.id },
+      data: { loginAttempts: 0, lockedUntil: null },
+    });
+  });
+
+  it('increments loginAttempts on failed password but does not lock yet (Issue #232)', async () => {
+    const user = mkUser({ loginAttempts: 2 });
+    (prisma.user.findFirst as jest.Mock).mockResolvedValue(user);
+    (prisma.user.update as jest.Mock).mockResolvedValue({});
+    bcryptMock.compare.mockResolvedValueOnce(false as never);
+
+    await expect(service.login(user.email, 'wrong-password')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: user.id },
+      data: { loginAttempts: 3, lockedUntil: null },
+    });
+  });
+
+  it('sets lockedUntil when loginAttempts reaches the threshold (Issue #232)', async () => {
+    const user = mkUser({ loginAttempts: 4 }); // next failure => 5 >= LOGIN_MAX_ATTEMPTS
+    (prisma.user.findFirst as jest.Mock).mockResolvedValue(user);
+    (prisma.user.update as jest.Mock).mockResolvedValue({});
+    bcryptMock.compare.mockResolvedValueOnce(false as never);
+
+    const before = Date.now();
+    await expect(service.login(user.email, 'wrong-password')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    const updateCall = prisma.user.update.mock.calls[0][0];
+    expect(updateCall.where).toEqual({ id: user.id });
+    expect(updateCall.data.loginAttempts).toBe(5);
+    expect(updateCall.data.lockedUntil).toBeInstanceOf(Date);
+    const lockedUntil = updateCall.data.lockedUntil as Date;
+    // Should be roughly LOGIN_LOCKOUT_SECONDS in the future (allow small drift).
+    expect(lockedUntil.getTime() - before).toBeGreaterThanOrEqual(890_000);
+    expect(lockedUntil.getTime() - before).toBeLessThanOrEqual(910_000);
+  });
+
+  it('rejects login while account is locked and surfaces retryAfterSeconds (Issue #232/#229)', async () => {
+    const retryAfter = 120;
+    const user = mkUser({
+      loginAttempts: 5,
+      lockedUntil: new Date(Date.now() + retryAfter * 1000),
+    });
+    (prisma.user.findFirst as jest.Mock).mockResolvedValue(user);
+
+    try {
+      await service.login(user.email, 'any-password');
+      fail('Expected login() to reject');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      const response = (err as UnauthorizedException).getResponse() as {
+        message: string;
+        retryAfterSeconds?: number;
+      };
+      expect(response.message).toMatch(/Account locked/);
+      expect(response.retryAfterSeconds).toBeGreaterThanOrEqual(retryAfter - 5);
+      expect(response.retryAfterSeconds).toBeLessThanOrEqual(retryAfter);
+    }
+  });
+
+  it('does not lock accounts with no passwordHash (Issue #232)', async () => {
+    const user = mkUser({ passwordHash: null });
+    (prisma.user.findFirst as jest.Mock).mockResolvedValue(user);
+
+    await expect(service.login(user.email, 'any')).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('UsersService unlockUser (Issue #232)', () => {
+  let prisma: {
+    user: {
+      findFirst: jest.Mock;
+      update: jest.Mock;
+    };
+    auditLog: { create: jest.Mock };
+  };
+  let cache: Keyv;
+  let service: UsersService;
+
+  beforeEach(() => {
+    prisma = {
+      user: { findFirst: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    cache = {
+      get: jest.fn(),
+      set: jest.fn(),
+      delete: jest.fn(),
+    } as unknown as Keyv;
+
+    service = new UsersService(
+      prisma as unknown as PrismaService,
+      { sign: jest.fn() } as unknown as JwtService,
+      new ConfigService({}),
+      cache,
+    );
+  });
+
+  /**
+   * Helper: match the admin lookup's OR-shaped where clause used by
+   * `verifyAdminRole`. Without this, the mock returns null and the
+   * test accidentally exercises verifyAdminRole's failure path
+   * instead of the unlock code under test.
+   *
+   * `targetById` is an optional record keyed by `args.where.id` so we
+   * can also return different values for the target-user lookup.
+   */
+  const mockReturnsAdminAndTargets = (
+    callerId: string,
+    adminRecord: unknown,
+    targetById: Record<string, unknown> = {},
+  ) =>
+    jest.fn().mockImplementation((args: any) => {
+      const orClauses = args?.where?.OR ?? [];
+      const matchesAdminLookup = orClauses.some(
+        (clause: { id?: string; walletAddress?: string }) =>
+          clause?.id === callerId || clause?.walletAddress === callerId,
+      );
+      if (matchesAdminLookup) {
+        return adminRecord;
+      }
+      const targetId = args?.where?.id;
+      if (targetId && Object.prototype.hasOwnProperty.call(targetById, targetId)) {
+        return targetById[targetId];
+      }
+      return null;
+    });
+
+  it('unlocks a locked user and writes an audit log', async () => {
+    const admin = { id: 'admin-1', role: 'ADMIN' };
+    const target = {
+      id: 'user-locked',
+      deletedAt: null,
+      loginAttempts: 5,
+      lockedUntil: new Date(Date.now() + 60_000),
+    };
+    (prisma.user.findFirst as jest.Mock) = mockReturnsAdminAndTargets(
+      'admin-1',
+      admin,
+      { 'user-locked': target },
+    );
+
+    const result = await service.unlockUser('user-locked', 'admin-1');
+
+    expect(result.success).toBe(true);
+    expect(result.message).toMatch(/unlocked/i);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-locked' },
+      data: { loginAttempts: 0, lockedUntil: null },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'admin-1',
+        action: 'ADMIN_ACTION',
+        resourceType: 'User',
+        resourceId: 'user-locked',
+        details: expect.stringContaining('ACCOUNT_UNLOCK'),
+      }),
+    });
+  });
+
+  it('returns success without writing when account is not locked', async () => {
+    const admin = { id: 'admin-1', role: 'ADMIN' };
+    const target = {
+      id: 'user-clean',
+      deletedAt: null,
+      loginAttempts: 0,
+      lockedUntil: null,
+    };
+    (prisma.user.findFirst as jest.Mock) = mockReturnsAdminAndTargets(
+      'admin-1',
+      admin,
+      { 'user-clean': target },
+    );
+
+    const result = await service.unlockUser('user-clean', 'admin-1');
+
+    expect(result.message).toMatch(/not locked/i);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('throws NotFoundException when target user does not exist', async () => {
+    const admin = { id: 'admin-1', role: 'ADMIN' };
+    (prisma.user.findFirst as jest.Mock) = mockReturnsAdminAndTargets(
+      'admin-1',
+      admin,
+    );
+
+    await expect(service.unlockUser('missing-user', 'admin-1')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('throws ForbiddenException when caller is not an admin', async () => {
+    const nonAdmin = { id: 'user-2', role: 'USER' };
+    (prisma.user.findFirst as jest.Mock) = mockReturnsAdminAndTargets(
+      'user-2',
+      nonAdmin,
+    );
+
+    await expect(service.unlockUser('any-id', 'user-2')).rejects.toThrow(
+      ForbiddenException,
     );
   });
 });
