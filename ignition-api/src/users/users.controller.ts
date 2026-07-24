@@ -75,7 +75,16 @@ export class UsersController {
    * Register with email + password + walletAddress.
    */
   @Post('register')
-  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User registered successfully' })
   async register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
@@ -102,7 +111,16 @@ export class UsersController {
    * Authenticate with email + password, returns access and refresh tokens.
    */
   @Post('login')
-  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
   @ApiOperation({ summary: 'Login user' })
   @ApiResponse({ status: 201, description: 'User logged in successfully' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })

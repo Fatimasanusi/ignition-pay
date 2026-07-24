@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { CacheModule } from '@nestjs/cache-manager';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SessionModule } from '../session/session.module';
@@ -31,7 +30,6 @@ import { PermissionsGuard } from './permissions/permissions.guard';
       }),
     }),
     PrismaModule,
-    CacheModule,
     SessionModule,
   ],
   controllers: [
