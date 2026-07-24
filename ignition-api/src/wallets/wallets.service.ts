@@ -11,6 +11,7 @@ import Keyv from 'keyv';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWalletDto, WalletNetwork } from './dto/create-wallet.dto';
+import { WalletType } from '@prisma/client';
 
 @Injectable()
 export class WalletsService {
@@ -30,16 +31,29 @@ export class WalletsService {
    * Create a new wallet for a user, assigning a deposit address and configuring limits.
    */
   async createWallet(userId: string, dto: CreateWalletDto) {
-    // Verify user exists
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // Verify user exists and is active
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, isActive: true, deletedAt: null },
+    });
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
     const network = dto.network ?? WalletNetwork.STELLAR;
+    const walletType = dto.walletType ?? WalletType.CUSTODIAL;
 
-    // Determine deposit address (auto-generate if not provided)
-    const depositAddress = dto.depositAddress ?? StellarSdk.Keypair.random().publicKey();
+    // NON_CUSTODIAL: user must supply their own public key / deposit address;
+    // the server never generates or stores a secret key.
+    if (walletType === WalletType.NON_CUSTODIAL && !dto.depositAddress) {
+      throw new BadRequestException(
+        'depositAddress is required for NON_CUSTODIAL wallets',
+      );
+    }
+
+    // CUSTODIAL: auto-generate a keypair when no address is supplied.
+    // NON_CUSTODIAL: only the user-provided public address is stored.
+    const depositAddress =
+      dto.depositAddress ?? StellarSdk.Keypair.random().publicKey();
 
     // Validate Stellar addresses
     if (
@@ -64,6 +78,7 @@ export class WalletsService {
         userId,
         network,
         depositAddress,
+        walletType,
         label: dto.label ?? null,
         dailyLimit: dto.dailyLimit ?? 1000,
         monthlyLimit: dto.monthlyLimit ?? 10000,
@@ -75,6 +90,7 @@ export class WalletsService {
       userId: wallet.userId,
       network: wallet.network,
       depositAddress: wallet.depositAddress,
+      walletType: wallet.walletType,
       label: wallet.label,
       dailyLimit: Number(wallet.dailyLimit),
       monthlyLimit: Number(wallet.monthlyLimit),

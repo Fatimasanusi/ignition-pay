@@ -8,6 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { SessionService } from './session.service';
+import { PermissionsService } from '../auth/permissions/permissions.service';
 
 export interface AuthenticatedRequest extends Request {
   user: {
@@ -15,6 +16,10 @@ export interface AuthenticatedRequest extends Request {
     walletAddress: string;
     role: string;
     sessionId: string;
+    // Issue #230: scopes from the JWT `scope` claim, or the role fall-back
+    // when the token predates the claim. Always defined so guards have a
+    // uniform shape to consume.
+    scopes: string[];
   };
 }
 
@@ -24,16 +29,17 @@ export class SessionGuard implements CanActivate {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly sessionService: SessionService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context
-      .switchToHttp()
-      .getRequest<AuthenticatedRequest>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     const authHeader = request.headers['authorization'];
     if (!authHeader?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing or invalid Authorization header');
+      throw new UnauthorizedException(
+        'Missing or invalid Authorization header',
+      );
     }
 
     const token = authHeader.slice(7);
@@ -41,8 +47,11 @@ export class SessionGuard implements CanActivate {
 
     try {
       payload = this.jwt.verify(token, {
-        secret: this.config.get<string>('JWT_SECRET', 'stellaraid-default-secret'),
-      }) as Record<string, unknown>;
+        secret: this.config.get<string>(
+          'JWT_SECRET',
+          'stellaraid-default-secret',
+        ),
+      });
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }
@@ -61,11 +70,24 @@ export class SessionGuard implements CanActivate {
     // Slide the session TTL on each use
     void this.sessionService.touchSession(sessionId);
 
+    // Issue #230: prefer the JWT `scope` claim (least-privilege enforced by
+    // the token itself), fall back to the role→permission map for legacy
+    // tokens minted before the claim was introduced.
+    const encodedScopes = this.permissionsService.parseScopeString(
+      payload['scope'] as string | undefined,
+    );
+    const role = (payload['role'] as string | undefined) ?? '';
+    const scopes =
+      encodedScopes.length > 0
+        ? encodedScopes
+        : this.permissionsService.getUserPermissions(role);
+
     request.user = {
       userId: payload['sub'] as string,
       walletAddress: payload['walletAddress'] as string,
-      role: payload['role'] as string,
+      role,
       sessionId,
+      scopes,
     };
 
     return true;

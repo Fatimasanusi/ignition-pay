@@ -13,10 +13,7 @@ describe('AdminGuard', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AdminGuard,
-        { provide: PrismaService, useValue: prisma },
-      ],
+      providers: [AdminGuard, { provide: PrismaService, useValue: prisma }],
     }).compile();
 
     guard = module.get<AdminGuard>(AdminGuard);

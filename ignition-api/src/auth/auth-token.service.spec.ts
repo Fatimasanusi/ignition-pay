@@ -1,8 +1,12 @@
-import { UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthTokenService } from './auth-token.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsService } from './permissions/permissions.service';
 import Keyv from 'keyv';
 import { UserRole } from '@prisma/client';
 
@@ -34,6 +38,11 @@ interface MockPrismaService {
   };
 }
 
+interface MockPermissionsService {
+  getScopeStringForRole: jest.Mock;
+  getUserPermissions: jest.Mock;
+}
+
 const mockPrisma = (): MockPrismaService => ({
   user: {
     findUnique: jest.fn(),
@@ -46,6 +55,7 @@ describe('AuthTokenService', () => {
   let prisma: MockPrismaService;
   let cache: MockKeyv;
   let config: ConfigService;
+  let perms: MockPermissionsService;
 
   const testUser = {
     id: 'user-123',
@@ -73,11 +83,22 @@ describe('AuthTokenService', () => {
       JWT_SECRET: 'test-jwt-secret',
       REFRESH_TOKEN_SECRET: 'test-refresh-secret',
     });
+    // Issue #230: PermissionsService is now injected. Mock the scope-string
+    // lookup with a recognisable token so assertions can pin it.
+    perms = {
+      getScopeStringForRole: jest
+        .fn()
+        .mockReturnValue('wallet:read wallet:create'),
+      getUserPermissions: jest
+        .fn()
+        .mockReturnValue(['wallet:read', 'wallet:create']),
+    };
 
     service = new AuthTokenService(
       jwt as unknown as JwtService,
       config,
       prisma as unknown as PrismaService,
+      perms as unknown as PermissionsService,
       cache as unknown as Keyv,
     );
   });
@@ -85,7 +106,9 @@ describe('AuthTokenService', () => {
   describe('validateAndRotate', () => {
     // Feature: token-refresh-endpoint, Property 1: Empty and whitespace refresh tokens are always rejected
     it('rejects empty refresh token', async () => {
-      await expect(service.validateAndRotate('')).rejects.toThrow(UnauthorizedException);
+      await expect(service.validateAndRotate('')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     // Feature: token-refresh-endpoint, Property 2: Payloads without a valid sub claim are always rejected
@@ -132,18 +155,21 @@ describe('AuthTokenService', () => {
       jwt.verify.mockReturnValue({ sub: 'non-existent-user' });
       prisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('returns 401 "Account is inactive" when user is not active', async () => {
       jwt.verify.mockReturnValue({ sub: testUser.id });
-      prisma.user.findUnique.mockResolvedValue({ ...testUser, isActive: false });
+      prisma.user.findUnique.mockResolvedValue({
+        ...testUser,
+        isActive: false,
+      });
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('returns 401 "Refresh token has been revoked" when no stored token', async () => {
@@ -151,9 +177,9 @@ describe('AuthTokenService', () => {
       prisma.user.findUnique.mockResolvedValue(testUser);
       cache.get.mockResolvedValue(undefined);
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     // Feature: token-refresh-endpoint, Property 3: Token mismatch always produces a revoked response
@@ -162,18 +188,18 @@ describe('AuthTokenService', () => {
       prisma.user.findUnique.mockResolvedValue(testUser);
       cache.get.mockResolvedValue('different-stored-token');
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('returns 503 when Prisma throws', async () => {
       jwt.verify.mockReturnValue({ sub: testUser.id });
       prisma.user.findUnique.mockRejectedValue(new Error('DB error'));
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        ServiceUnavailableException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(ServiceUnavailableException);
     });
 
     it('returns 503 when cache.get throws', async () => {
@@ -181,9 +207,9 @@ describe('AuthTokenService', () => {
       prisma.user.findUnique.mockResolvedValue(testUser);
       cache.get.mockRejectedValue(new Error('Redis error'));
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        ServiceUnavailableException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(ServiceUnavailableException);
     });
 
     // Feature: token-refresh-endpoint, Property 6: Token rotation replaces the stored token
@@ -202,11 +228,13 @@ describe('AuthTokenService', () => {
       const result = await service.validateAndRotate(validRefreshToken);
 
       // Feature: token-refresh-endpoint, Property 4: New access token always contains the correct claims
+      // Issue #230: also includes a `scope` claim derived from the role.
       expect(jwt.sign).toHaveBeenCalledWith(
         expect.objectContaining({
           sub: testUser.id,
           walletAddress: testUser.walletAddress,
           role: testUser.role,
+          scope: 'wallet:read wallet:create',
         }),
         expect.objectContaining({
           secret: 'test-jwt-secret',
@@ -223,12 +251,18 @@ describe('AuthTokenService', () => {
         }),
       );
 
-      expect(cache.delete).toHaveBeenCalledWith(`refresh:${testUser.walletAddress}`);
+      expect(cache.delete).toHaveBeenCalledWith(
+        `refresh:${testUser.walletAddress}`,
+      );
       expect(cache.set).toHaveBeenCalledWith(
         `refresh:${testUser.walletAddress}`,
         newRefreshToken,
         7 * 24 * 60 * 60 * 1000,
       );
+
+      // Issue #230 — on rotation, scope must be re-derived from the user's
+      // fresh role so role changes take effect on the very next refresh.
+      expect(perms.getScopeStringForRole).toHaveBeenCalledWith(testUser.role);
 
       // Feature: token-refresh-endpoint, Property 7: Successful refresh response always contains all required fields
       expect(result).toEqual({
@@ -250,9 +284,9 @@ describe('AuthTokenService', () => {
       cache.delete.mockResolvedValue(true);
       cache.set.mockRejectedValue(new Error('Redis write error'));
 
-      await expect(service.validateAndRotate(validRefreshToken)).rejects.toThrow(
-        ServiceUnavailableException,
-      );
+      await expect(
+        service.validateAndRotate(validRefreshToken),
+      ).rejects.toThrow(ServiceUnavailableException);
     });
 
     // Feature: token-refresh-endpoint, Property 10: Error responses never leak the refresh token
@@ -265,7 +299,9 @@ describe('AuthTokenService', () => {
         await service.validateAndRotate(validRefreshToken);
       } catch (error) {
         expect(error).toBeInstanceOf(UnauthorizedException);
-        expect((error as UnauthorizedException).message).toBe('Refresh token has been revoked');
+        expect((error as UnauthorizedException).message).toBe(
+          'Refresh token has been revoked',
+        );
         expect(JSON.stringify(error)).not.toContain(validRefreshToken);
       }
     });
@@ -276,18 +312,22 @@ describe('AuthTokenService', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   describe('issueTokenPair', () => {
-    it('mints access + refresh tokens with correct access claims', async () => {
+    it('mints access + refresh tokens with correct access claims, including scope (#230)', async () => {
       jwt.sign
         .mockReturnValueOnce(newAccessToken)
         .mockReturnValueOnce(newRefreshToken);
 
       const result = await service.issueTokenPair(testUser);
 
+      // Issue #230 — the role is fed into the scope-string lookup.
+      expect(perms.getScopeStringForRole).toHaveBeenCalledWith(testUser.role);
+
       expect(jwt.sign).toHaveBeenCalledWith(
         expect.objectContaining({
           sub: testUser.id,
           walletAddress: testUser.walletAddress,
           role: testUser.role,
+          scope: 'wallet:read wallet:create',
         }),
         expect.objectContaining({
           secret: 'test-jwt-secret',
@@ -314,6 +354,7 @@ describe('AuthTokenService', () => {
           sub: testUser.id,
           walletAddress: testUser.walletAddress,
           role: testUser.role,
+          scope: 'wallet:read wallet:create',
           sid: 'sess-abc',
         }),
       );
@@ -390,6 +431,59 @@ describe('AuthTokenService', () => {
       await expect(
         service.revokeRefreshToken(testUser.walletAddress),
       ).rejects.toThrow(ServiceUnavailableException);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // Access-token blacklist
+  // ────────────────────────────────────────────────────────────────────────
+
+  describe('blacklistAccessToken', () => {
+    it('stores a revoked flag for the session id with 15-minute TTL', async () => {
+      cache.set.mockResolvedValue('OK');
+
+      await service.blacklistAccessToken('sess-abc');
+
+      expect(cache.set).toHaveBeenCalledWith(
+        'revoked:sess-abc',
+        '1',
+        15 * 60 * 1000,
+      );
+    });
+
+    it('returns 503 when cache.set fails', async () => {
+      cache.set.mockRejectedValue(new Error('Redis error'));
+
+      await expect(service.blacklistAccessToken('sess-abc')).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+    });
+  });
+
+  describe('isAccessTokenBlacklisted', () => {
+    it('returns true when session id is in the blacklist', async () => {
+      cache.get.mockResolvedValue('1');
+
+      const result = await service.isAccessTokenBlacklisted('sess-abc');
+
+      expect(result).toBe(true);
+      expect(cache.get).toHaveBeenCalledWith('revoked:sess-abc');
+    });
+
+    it('returns false when session id is not in the blacklist', async () => {
+      cache.get.mockResolvedValue(undefined);
+
+      const result = await service.isAccessTokenBlacklisted('sess-abc');
+
+      expect(result).toBe(false);
+    });
+
+    it('returns false (fail-open) when cache throws', async () => {
+      cache.get.mockRejectedValue(new Error('Redis error'));
+
+      const result = await service.isAccessTokenBlacklisted('sess-abc');
+
+      expect(result).toBe(false);
     });
   });
 });

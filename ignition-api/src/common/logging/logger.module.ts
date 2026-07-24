@@ -32,7 +32,10 @@ function buildTransports(env: string, level: string): winston.transport[] {
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const env = config.get<string>('NODE_ENV', 'development');
-        const level = config.get<string>('LOG_LEVEL', env === 'production' ? 'info' : 'debug');
+        const level = config.get<string>(
+          'LOG_LEVEL',
+          env === 'production' ? 'info' : 'debug',
+        );
 
         return {
           level,

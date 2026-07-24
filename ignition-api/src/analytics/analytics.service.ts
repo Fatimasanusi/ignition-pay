@@ -14,9 +14,7 @@ export class AnalyticsService {
   track(event: AnalyticsEvent): void {
     const { name, userId, properties } = event;
 
-    this.logger.log(
-      JSON.stringify({ event: name, userId, ...properties }),
-    );
+    this.logger.log(JSON.stringify({ event: name, userId, ...properties }));
 
     Sentry.addBreadcrumb({
       category: 'analytics',

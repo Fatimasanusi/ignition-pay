@@ -6,6 +6,14 @@ import 'app.dart';
 import 'core/push_notification_service.dart';
 
 void main() async {
+  Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  await MonitoringService.init();   // ← Add this line
+  
+  runApp(const MyApp());
+}
+
   WidgetsFlutterBinding.ensureInitialized();
   
   // Load environment variables

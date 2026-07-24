@@ -10,7 +10,12 @@ import { PermissionsService } from '../auth/permissions/permissions.service';
 
 describe('CampaignsController', () => {
   let controller: CampaignsController;
-  let service: jest.Mocked<Pick<CampaignsService, 'createCampaign' | 'updateCampaign' | 'browseCampaigns'>>;
+  let service: jest.Mocked<
+    Pick<
+      CampaignsService,
+      'createCampaign' | 'updateCampaign' | 'browseCampaigns'
+    >
+  >;
   let mockCache: { get: jest.Mock; set: jest.Mock };
 
   beforeEach(async () => {
@@ -18,7 +23,7 @@ describe('CampaignsController', () => {
       createCampaign: jest.fn(),
       updateCampaign: jest.fn(),
       browseCampaigns: jest.fn(),
-    } as any;
+    };
 
     mockCache = {
       get: jest.fn(),
@@ -30,7 +35,10 @@ describe('CampaignsController', () => {
       providers: [
         { provide: CampaignsService, useValue: service },
         { provide: CACHE_MANAGER, useValue: mockCache },
-        { provide: PermissionsService, useValue: { getUserPermissions: jest.fn() } },
+        {
+          provide: PermissionsService,
+          useValue: { getUserPermissions: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -53,7 +61,10 @@ describe('CampaignsController', () => {
         walletNetwork: 'STELLAR' as any,
         milestones: [],
       };
-      service.createCampaign.mockResolvedValue({ id: 'camp-123', ...dto } as any);
+      service.createCampaign.mockResolvedValue({
+        id: 'camp-123',
+        ...dto,
+      } as any);
 
       const res = await controller.create(dto, req);
 
@@ -68,11 +79,18 @@ describe('CampaignsController', () => {
       const dto: UpdateCampaignDto = {
         title: 'New Title',
       };
-      service.updateCampaign.mockResolvedValue({ id: 'camp-123', title: 'New Title' } as any);
+      service.updateCampaign.mockResolvedValue({
+        id: 'camp-123',
+        title: 'New Title',
+      } as any);
 
       const res = await controller.update('camp-123', dto, req);
 
-      expect(service.updateCampaign).toHaveBeenCalledWith('user-123', 'camp-123', dto);
+      expect(service.updateCampaign).toHaveBeenCalledWith(
+        'user-123',
+        'camp-123',
+        dto,
+      );
       expect(res).toEqual({ id: 'camp-123', title: 'New Title' });
     });
 
@@ -90,13 +108,22 @@ describe('CampaignsController', () => {
 
   describe('browseCampaigns', () => {
     it('should return cached value if present', async () => {
-      const query: BrowseCampaignsQueryDto = { page: 1, limit: 10, sortBy: 'createdAt' };
-      const cachedResult = { data: [{ id: 'camp-123' }], meta: { total: 1, page: 1, limit: 10, pages: 1 } };
+      const query: BrowseCampaignsQueryDto = {
+        page: 1,
+        limit: 10,
+        sortBy: 'createdAt',
+      };
+      const cachedResult = {
+        data: [{ id: 'camp-123' }],
+        meta: { total: 1, page: 1, limit: 10, pages: 1 },
+      };
       mockCache.get.mockResolvedValue(cachedResult);
 
       const res = await controller.browseCampaigns(query);
 
-      expect(mockCache.get).toHaveBeenCalledWith('campaigns:page:1:limit:10:sortBy:createdAt');
+      expect(mockCache.get).toHaveBeenCalledWith(
+        'campaigns:page:1:limit:10:sortBy:createdAt',
+      );
       expect(service.browseCampaigns).not.toHaveBeenCalled();
       expect(res).toEqual(cachedResult);
     });
@@ -107,19 +134,27 @@ describe('CampaignsController', () => {
         limit: 10,
         sortBy: 'createdAt',
         category: 'ENVIRONMENT',
-        status: 'ACTIVE' as any,
+        status: 'ACTIVE',
         search: 'forest',
       };
-      const serviceResult = { data: [{ id: 'camp-123' }], meta: { total: 1, page: 1, limit: 10, pages: 1 } };
+      const serviceResult = {
+        data: [{ id: 'camp-123' }],
+        meta: { total: 1, page: 1, limit: 10, pages: 1 },
+      };
       mockCache.get.mockResolvedValue(null);
       service.browseCampaigns.mockResolvedValue(serviceResult);
 
       const res = await controller.browseCampaigns(query);
 
-      const expectedCacheKey = 'campaigns:page:1:limit:10:sortBy:createdAt:category:ENVIRONMENT:status:ACTIVE:search:forest';
+      const expectedCacheKey =
+        'campaigns:page:1:limit:10:sortBy:createdAt:category:ENVIRONMENT:status:ACTIVE:search:forest';
       expect(mockCache.get).toHaveBeenCalledWith(expectedCacheKey);
       expect(service.browseCampaigns).toHaveBeenCalledWith(query);
-      expect(mockCache.set).toHaveBeenCalledWith(expectedCacheKey, serviceResult, 30000);
+      expect(mockCache.set).toHaveBeenCalledWith(
+        expectedCacheKey,
+        serviceResult,
+        30000,
+      );
       expect(res).toEqual(serviceResult);
     });
   });

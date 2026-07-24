@@ -22,6 +22,11 @@ import { TransactionsService } from './transactions.service';
     }),
   ],
   controllers: [TransactionsController],
-  providers: [TransactionsService, JwtAuthGuard, PermissionsService, PermissionsGuard],
+  providers: [
+    TransactionsService,
+    JwtAuthGuard,
+    PermissionsService,
+    PermissionsGuard,
+  ],
 })
 export class TransactionsModule {}

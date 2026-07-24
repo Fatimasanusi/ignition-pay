@@ -10,8 +10,12 @@ import { AdminGuard } from '../users/guards/admin.guard';
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [ApiKeysController],
-  providers: [ApiKeyGuard, ApiKeyScopeGuard, ApiKeyExpirationService, AdminGuard],
+  providers: [
+    ApiKeyGuard,
+    ApiKeyScopeGuard,
+    ApiKeyExpirationService,
+    AdminGuard,
+  ],
   exports: [ApiKeyGuard, ApiKeyScopeGuard, ApiKeyExpirationService],
 })
 export class ApiKeysModule {}
-

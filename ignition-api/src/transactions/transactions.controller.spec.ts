@@ -10,13 +10,16 @@ describe('TransactionsController', () => {
   beforeEach(async () => {
     service = {
       getTransactions: jest.fn(),
-    } as any;
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TransactionsController],
       providers: [
         { provide: TransactionsService, useValue: service },
-        { provide: PermissionsService, useValue: { getUserPermissions: jest.fn() } },
+        {
+          provide: PermissionsService,
+          useValue: { getUserPermissions: jest.fn() },
+        },
       ],
     }).compile();
 

@@ -4,10 +4,19 @@ import { AddressesService } from './addresses.service';
 
 describe('AddressesController', () => {
   let controller: AddressesController;
-  let service: jest.Mocked<Pick<
-    AddressesService,
-    'create' | 'findAll' | 'findOne' | 'findByWallet' | 'update' | 'remove' | 'generate' | 'listByWallet'
-  >>;
+  let service: jest.Mocked<
+    Pick<
+      AddressesService,
+      | 'create'
+      | 'findAll'
+      | 'findOne'
+      | 'findByWallet'
+      | 'update'
+      | 'remove'
+      | 'generate'
+      | 'listByWallet'
+    >
+  >;
 
   beforeEach(async () => {
     service = {
@@ -19,7 +28,7 @@ describe('AddressesController', () => {
       remove: jest.fn(),
       generate: jest.fn(),
       listByWallet: jest.fn(),
-    } as any;
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AddressesController],
@@ -34,7 +43,12 @@ describe('AddressesController', () => {
   });
 
   it('create() should call addressesService.create', async () => {
-    const dto = { walletId: 'w-123', address: 'G123', network: 'STELLAR' as any, label: 'test' };
+    const dto = {
+      walletId: 'w-123',
+      address: 'G123',
+      network: 'STELLAR' as any,
+      label: 'test',
+    };
     service.create.mockResolvedValue({ id: 'addr-123', ...dto } as any);
     const res = await controller.create(dto);
     expect(service.create).toHaveBeenCalledWith(dto);
@@ -64,7 +78,10 @@ describe('AddressesController', () => {
 
   it('update() should call addressesService.update', async () => {
     const dto = { label: 'new-label' };
-    service.update.mockResolvedValue({ id: 'addr-123', label: 'new-label' } as any);
+    service.update.mockResolvedValue({
+      id: 'addr-123',
+      label: 'new-label',
+    } as any);
     const res = await controller.update('addr-123', dto);
     expect(service.update).toHaveBeenCalledWith('addr-123', dto);
     expect(res).toEqual({ id: 'addr-123', label: 'new-label' });

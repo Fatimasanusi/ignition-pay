@@ -9,6 +9,7 @@ import {
   UseFilters,
   UseGuards,
   Request,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -48,8 +49,20 @@ interface AuthenticatedRequest {
   user: {
     sub?: string;
     userId?: string;
-    walletAddress: string;
+    walletAddress?: string;
   };
+}
+
+/**
+ * Extracts and validates walletAddress from the JWT user payload.
+ * Throws UnauthorizedException if missing or empty (Issue #127).
+ */
+function resolveWalletAddress(req: AuthenticatedRequest): string {
+  const addr = req.user?.walletAddress;
+  if (!addr) {
+    throw new UnauthorizedException('Wallet address not found in token');
+  }
+  return addr;
 }
 
 @ApiTags('users')
@@ -65,7 +78,16 @@ export class UsersController {
    * Register with email + password + walletAddress.
    */
   @Post('register')
-  @Throttle({ strict: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User registered successfully' })
   async register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
@@ -119,7 +141,7 @@ export class UsersController {
   ): Promise<PasswordActionResponseDto> {
     return this.usersService.setupPassword({
       userId: req.user.sub,
-      walletAddress: req.user.walletAddress,
+      walletAddress: resolveWalletAddress(req),
       password: dto.password,
     });
   }
@@ -136,7 +158,7 @@ export class UsersController {
   ): Promise<PasswordActionResponseDto> {
     return this.usersService.changePassword({
       userId: req.user.sub,
-      walletAddress: req.user.walletAddress,
+      walletAddress: resolveWalletAddress(req),
       currentPassword: dto.currentPassword,
       newPassword: dto.newPassword,
     });
@@ -151,7 +173,7 @@ export class UsersController {
   async getMyProfile(
     @Request() req: AuthenticatedRequest,
   ): Promise<UserProfileDto> {
-    return this.usersService.getMyProfile(req.user.walletAddress);
+    return this.usersService.getMyProfile(resolveWalletAddress(req));
   }
 
   /**
@@ -174,7 +196,10 @@ export class UsersController {
     @Request() req: AuthenticatedRequest,
     @Body() updateDto: UpdateUserDto,
   ): Promise<UserProfileDto> {
-    return this.usersService.updateMyProfile(req.user.walletAddress, updateDto);
+    return this.usersService.updateMyProfile(
+      resolveWalletAddress(req),
+      updateDto,
+    );
   }
 
   /**
@@ -185,7 +210,7 @@ export class UsersController {
   async getProfile(
     @Request() req: AuthenticatedRequest,
   ): Promise<UserProfileDto> {
-    return this.usersService.getMyProfile(req.user.walletAddress);
+    return this.usersService.getMyProfile(resolveWalletAddress(req));
   }
 
   /**
@@ -197,7 +222,10 @@ export class UsersController {
     @Request() req: AuthenticatedRequest,
     @Body() updateDto: UpdateUserDto,
   ): Promise<UserProfileDto> {
-    return this.usersService.updateMyProfile(req.user.walletAddress, updateDto);
+    return this.usersService.updateMyProfile(
+      resolveWalletAddress(req),
+      updateDto,
+    );
   }
 
   /**
@@ -231,7 +259,7 @@ export class AdminUsersController {
     return this.usersService.updateKYCStatus(
       userId,
       updateDto.status,
-      req.user.walletAddress,
+      resolveWalletAddress(req),
     );
   }
 
@@ -248,7 +276,8 @@ export class AdminUsersController {
     @Body() updateDto: UpdateUserRoleDto,
     @Request() req: AuthenticatedRequest,
   ): Promise<{ success: boolean; message: string }> {
-    const adminId = req.user.sub || req.user.userId || req.user.walletAddress;
+    const adminId =
+      req.user.sub || req.user.userId || req.user.walletAddress || '';
     return this.usersService.updateUserRole(userId, updateDto.role, adminId);
   }
 

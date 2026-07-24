@@ -67,7 +67,9 @@ describe('CryptoService', () => {
       const message = 'Hello Stellar';
       const sig = service.sign(message, kp.secretKey);
 
-      expect(service.verify('different message', sig, kp.publicKey)).toBe(false);
+      expect(service.verify('different message', sig, kp.publicKey)).toBe(
+        false,
+      );
       expect(service.verify(message, 'modifiedsig', kp.publicKey)).toBe(false);
     });
   });

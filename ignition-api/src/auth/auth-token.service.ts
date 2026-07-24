@@ -12,6 +12,7 @@ import { UserRole } from '@prisma/client';
 
 import { LoginResponseDto } from '../users/dto/login.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { PermissionsService } from './permissions/permissions.service';
 
 // Minimal user shape that AuthTokenService needs to mint/revoke tokens.
 // Allows callers (auth-verify.controller, users.service.login) to pass
@@ -29,11 +30,15 @@ interface RefreshTokenPayload {
   exp?: number;
 }
 
+// Issue #230: Access tokens carry the OAuth2 `scope` claim so route guards
+// can enforce least privilege without re-reading the role→permission map
+// on every request. The value is a space-delimited string per RFC 6749 §3.3.
 interface AccessTokenPayload {
   sub: string;
   walletAddress: string;
   role: UserRole | string;
   sid?: string;
+  scope?: string;
 }
 
 @Injectable()
@@ -47,6 +52,7 @@ export class AuthTokenService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly permissionsService: PermissionsService,
     @Inject(CACHE_MANAGER) private readonly cache: Keyv,
   ) {}
 
@@ -59,6 +65,16 @@ export class AuthTokenService {
   }
 
   /**
+   * Build the OAuth2 `scope` claim value (RFC 6749 §3.3) for the given
+   * role. Kept private so callers don't accidentally mint tokens with a
+   * hand-built scope that drifts from the role→permission map.
+   */
+  private buildScopeClaim(role: UserRole | string): string {
+    const roleKey = String(role ?? '');
+    return this.permissionsService.getScopeStringForRole(roleKey);
+  }
+
+  /**
    * Mint a fresh (access, refresh) token pair for a user, write the
    * refresh token into the cache so subsequent /auth/refresh calls can
    * validate + rotate it, and return both tokens.
@@ -66,6 +82,11 @@ export class AuthTokenService {
    * Passing a `sessionId` embeds it as a `sid` claim in the access token
    * so SessionGuard-based endpoints (e.g. /auth/logout) can resolve and
    * revoke the user's session on logout.
+   *
+   * Issue #230: the access token now carries a `scope` claim derived from
+   * the user's role so downstream guards can enforce least privilege.
+   * The refresh token stays minimal (sub + optional sid) and is resolved
+   * server-side on rotation so role changes propagate transparently.
    */
   async issueTokenPair(
     user: AuthenticatedUser,
@@ -77,6 +98,7 @@ export class AuthTokenService {
       sub: user.id,
       walletAddress,
       role: user.role,
+      scope: this.buildScopeClaim(user.role),
       ...(sessionId ? { sid: sessionId } : {}),
     };
 
@@ -115,6 +137,10 @@ export class AuthTokenService {
    * Validate a refresh token, rotate it in the cache, and return a brand
    * new (access, refresh) pair. Rejects expired/revoked/mismatched
    * tokens with 401; surfaces Redis / Prisma failures as 503.
+   *
+   * Issue #230: re-derives the `scope` claim from the freshly-read user's
+   * role so role changes (e.g. admin demotion) take effect on the very
+   * next token rotation without forcing the user to log out.
    */
   async validateAndRotate(refreshToken: string): Promise<LoginResponseDto> {
     if (!refreshToken || refreshToken.trim() === '') {
@@ -129,7 +155,7 @@ export class AuthTokenService {
           'REFRESH_TOKEN_SECRET',
           'default-refresh-secret',
         ),
-      }) as RefreshTokenPayload;
+      });
     } catch (err: unknown) {
       if (
         err &&
@@ -149,7 +175,7 @@ export class AuthTokenService {
     let user;
     try {
       user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
+        where: { id: payload.sub, isActive: true, deletedAt: null },
       });
     } catch {
       throw new ServiceUnavailableException('Service temporarily unavailable');
@@ -157,10 +183,6 @@ export class AuthTokenService {
 
     if (!user) {
       throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (!user.isActive) {
-      throw new UnauthorizedException('Account is inactive');
     }
 
     const cacheKey = this.refreshCacheKey(user.walletAddress ?? '');
@@ -176,24 +198,30 @@ export class AuthTokenService {
       throw new UnauthorizedException('Refresh token has been revoked');
     }
 
-    const accessPayload: AccessTokenPayload = {
+    // Issue #230: derive scopes from the current role so demotions/promotions
+    // take effect on the next refresh, without invalidating active sessions.
+    const rotationPayload: AccessTokenPayload = {
       sub: user.id,
       walletAddress: user.walletAddress ?? '',
       role: user.role,
+      scope: this.buildScopeClaim(user.role),
     };
 
-    const accessToken = this.jwt.sign(accessPayload, {
-      secret: this.config.get<string>('JWT_SECRET', 'stellaraid-default-secret'),
+    const accessToken = this.jwt.sign(rotationPayload, {
+      secret: this.config.get<string>('JWT_SECRET', 'default-secret'),
       expiresIn: this.ACCESS_TTL,
     });
 
-    const newRefreshToken = this.jwt.sign({ sub: user.id }, {
-      secret: this.config.get<string>(
-        'REFRESH_TOKEN_SECRET',
-        'default-refresh-secret',
-      ),
-      expiresIn: '7d',
-    });
+    const newRefreshToken = this.jwt.sign(
+      { sub: user.id },
+      {
+        secret: this.config.get<string>(
+          'REFRESH_TOKEN_SECRET',
+          'default-refresh-secret',
+        ),
+        expiresIn: '7d',
+      },
+    );
 
     try {
       await this.cache.delete(cacheKey);
@@ -210,7 +238,9 @@ export class AuthTokenService {
    * (and any other revoking flow) so that even if the refresh token was
    * stolen, it can never be used again after this call returns.
    */
-  async revokeRefreshToken(walletAddress: string | null | undefined): Promise<void> {
+  async revokeRefreshToken(
+    walletAddress: string | null | undefined,
+  ): Promise<void> {
     if (!walletAddress) {
       return;
     }
@@ -218,6 +248,50 @@ export class AuthTokenService {
       await this.cache.delete(this.refreshCacheKey(walletAddress));
     } catch {
       throw new ServiceUnavailableException('Service temporarily unavailable');
+    }
+  }
+
+  // ── Access-token blacklist ──────────────────────────────────────────────
+
+  /**
+   * Redis key used to flag a session ID as revoked.
+   * Checked by JwtStrategy.validate() so that even standard
+   * JwtAuthGuard-protected endpoints reject tokens whose session
+   * was destroyed (e.g. on logout).
+   */
+  blacklistKey(sessionId: string): string {
+    return `revoked:${sessionId}`;
+  }
+
+  /**
+   * Blacklist the current access token by its session ID.
+   * The entry expires after 15 minutes — the same TTL as the
+   * access token itself — so no manual cleanup is needed.
+   */
+  async blacklistAccessToken(sessionId: string): Promise<void> {
+    try {
+      await this.cache.set(
+        this.blacklistKey(sessionId),
+        '1',
+        15 * 60 * 1000, // 15 minutes in ms
+      );
+    } catch {
+      throw new ServiceUnavailableException('Service temporarily unavailable');
+    }
+  }
+
+  /**
+   * Returns true when the given session ID has been explicitly
+   * blacklisted (i.e. the session was revoked / user logged out).
+   */
+  async isAccessTokenBlacklisted(sessionId: string): Promise<boolean> {
+    try {
+      const val = await this.cache.get<string>(this.blacklistKey(sessionId));
+      return val === '1';
+    } catch {
+      // If Redis is down, fail open — the session guard / JWT
+      // expiry will still protect the endpoint.
+      return false;
     }
   }
 }

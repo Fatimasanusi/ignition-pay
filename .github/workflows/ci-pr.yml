@@ -35,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run TypeScript tests
-        run: pnpm --dir packages/core-ts test -- --coverage --ci
+        run: pnpm --dir packages/core-ts test -- --coverage
       - name: Upload TypeScript coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,7 +78,7 @@ jobs:
         run: |
           cd packages/core-dart
           dart pub global activate coverage
-          dart run coverage:format_coverage --lcov --in=coverage --out=coverage.lcov --packages=.dart_tool/package_config.json --report-on=lib
+          dart run coverage:format_coverage --lcov --in=coverage --out=coverage.lcov --package-config=.dart_tool/package_config.json --report-on=lib
       - name: Upload Dart coverage
         if: always()
         uses: actions/upload-artifact@v4

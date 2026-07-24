@@ -24,7 +24,11 @@ describe('AnalyticsService', () => {
   });
 
   it('track() should log and add Sentry breadcrumb', () => {
-    const event = { name: 'test_event', userId: 'user-1', properties: { key: 'value' } };
+    const event = {
+      name: 'test_event',
+      userId: 'user-1',
+      properties: { key: 'value' },
+    };
     service.track(event);
 
     expect(Sentry.addBreadcrumb).toHaveBeenCalledWith({

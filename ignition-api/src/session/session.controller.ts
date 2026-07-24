@@ -55,7 +55,9 @@ export class SessionController {
   async listSessions(
     @Req() req: AuthenticatedRequest,
   ): Promise<SessionInfoDto[]> {
-    const sessions = await this.sessionService.getActiveSessions(req.user.userId);
+    const sessions = await this.sessionService.getActiveSessions(
+      req.user.userId,
+    );
     return sessions.map((s) => this.toDto(s, req.user.sessionId));
   }
 
@@ -101,7 +103,10 @@ export class SessionController {
 
   // ── Helper ─────────────────────────────────────────────────────────────────
 
-  private toDto(session: SessionMetadata, currentSessionId: string): SessionInfoDto {
+  private toDto(
+    session: SessionMetadata,
+    currentSessionId: string,
+  ): SessionInfoDto {
     return {
       sessionId: session.sessionId,
       createdAt: session.createdAt,

@@ -21,7 +21,10 @@ export class CampaignsService {
     dto: UpdateCampaignDto,
   ) {
     const campaign = await this.prisma.campaign.findUnique({
-      where: { id: campaignId },
+      where: {
+        id: campaignId,
+        status: { notIn: ['CANCELLED', 'REJECTED', 'COMPLETED'] },
+      },
     });
 
     if (!campaign) {

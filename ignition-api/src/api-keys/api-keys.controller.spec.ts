@@ -68,7 +68,7 @@ describe('ApiKeysController', () => {
           action: 'ADMIN_ACTION',
           resourceType: 'ApiKey',
           resourceId: 'api-key-1',
-          details: expect.stringContaining('created'),
+          details: expect.stringContaining('CREATED'),
         }),
       }),
     );
@@ -129,7 +129,7 @@ describe('ApiKeysController', () => {
           action: 'ADMIN_ACTION',
           resourceType: 'ApiKey',
           resourceId: 'api-key-1',
-          details: expect.stringContaining('revoked'),
+          details: expect.stringContaining('REVOKED'),
         }),
       }),
     );

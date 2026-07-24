@@ -35,8 +35,14 @@ export class SessionService {
     @Inject(CACHE_MANAGER) private readonly cache: Keyv,
     private readonly config: ConfigService,
   ) {
-    this.accessTtlSeconds = this.config.get<number>('SESSION_ACCESS_TTL_SECONDS', 900);
-    this.sessionTtlSeconds = this.config.get<number>('SESSION_TTL_SECONDS', 604800); // 7d
+    this.accessTtlSeconds = this.config.get<number>(
+      'SESSION_ACCESS_TTL_SECONDS',
+      900,
+    );
+    this.sessionTtlSeconds = this.config.get<number>(
+      'SESSION_TTL_SECONDS',
+      604800,
+    ); // 7d
   }
 
   /** Generate a cryptographically random session ID */
@@ -77,7 +83,11 @@ export class SessionService {
     };
 
     // Persist session data
-    await this.cache.set(SESSION_KEY(sessionId), JSON.stringify(session), this.sessionTtlMs);
+    await this.cache.set(
+      SESSION_KEY(sessionId),
+      JSON.stringify(session),
+      this.sessionTtlMs,
+    );
 
     // Add to user's session index
     await this.addToUserIndex(params.userId, sessionId);
@@ -115,7 +125,11 @@ export class SessionService {
     session.lastSeenAt = Date.now();
     session.expiresAt = Date.now() + this.sessionTtlMs;
 
-    await this.cache.set(SESSION_KEY(sessionId), JSON.stringify(session), this.sessionTtlMs);
+    await this.cache.set(
+      SESSION_KEY(sessionId),
+      JSON.stringify(session),
+      this.sessionTtlMs,
+    );
   }
 
   /**
@@ -132,7 +146,9 @@ export class SessionService {
    */
   async revokeAllSessions(userId: string): Promise<void> {
     const sessionIds = await this.getUserSessionIds(userId);
-    await Promise.all(sessionIds.map((id) => this.cache.delete(SESSION_KEY(id))));
+    await Promise.all(
+      sessionIds.map((id) => this.cache.delete(SESSION_KEY(id))),
+    );
     await this.cache.delete(USER_SESSIONS_KEY(userId));
     this.logger.log(`All sessions revoked for user ${userId}`);
   }
@@ -175,30 +191,51 @@ export class SessionService {
     }
   }
 
-  private async addToUserIndex(userId: string, sessionId: string): Promise<void> {
+  private async addToUserIndex(
+    userId: string,
+    sessionId: string,
+  ): Promise<void> {
     const existing = await this.getUserSessionIds(userId);
     const updated = [...new Set([...existing, sessionId])];
     // Keep the index alive as long as the longest possible session
-    await this.cache.set(USER_SESSIONS_KEY(userId), JSON.stringify(updated), this.sessionTtlMs);
+    await this.cache.set(
+      USER_SESSIONS_KEY(userId),
+      JSON.stringify(updated),
+      this.sessionTtlMs,
+    );
   }
 
-  private async removeFromUserIndex(userId: string, sessionId: string): Promise<void> {
+  private async removeFromUserIndex(
+    userId: string,
+    sessionId: string,
+  ): Promise<void> {
     const existing = await this.getUserSessionIds(userId);
     const updated = existing.filter((id) => id !== sessionId);
     if (updated.length === 0) {
       await this.cache.delete(USER_SESSIONS_KEY(userId));
     } else {
-      await this.cache.set(USER_SESSIONS_KEY(userId), JSON.stringify(updated), this.sessionTtlMs);
+      await this.cache.set(
+        USER_SESSIONS_KEY(userId),
+        JSON.stringify(updated),
+        this.sessionTtlMs,
+      );
     }
   }
 
-  private async pruneUserIndex(userId: string, staleIds: string[]): Promise<void> {
+  private async pruneUserIndex(
+    userId: string,
+    staleIds: string[],
+  ): Promise<void> {
     const existing = await this.getUserSessionIds(userId);
     const updated = existing.filter((id) => !staleIds.includes(id));
     if (updated.length === 0) {
       await this.cache.delete(USER_SESSIONS_KEY(userId));
     } else {
-      await this.cache.set(USER_SESSIONS_KEY(userId), JSON.stringify(updated), this.sessionTtlMs);
+      await this.cache.set(
+        USER_SESSIONS_KEY(userId),
+        JSON.stringify(updated),
+        this.sessionTtlMs,
+      );
     }
   }
 }

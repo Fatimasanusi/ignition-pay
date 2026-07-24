@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:convert';
+import 'package:convert/convert.dart' as convert;
 import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import '../util/strkey.dart';
@@ -31,10 +32,10 @@ class SignatureResult {
   });
 
   /// Encodes the signature as a hex string.
-  String get signatureHex => hex.encode(signature);
+  String get signatureHex => convert.hex.encode(signature);
 
   /// Encodes the public key as a hex string.
-  String get publicKeyHex => hex.encode(publicKey);
+  String get publicKeyHex => convert.hex.encode(publicKey);
 }
 
 /// Result of a verification operation.
@@ -61,7 +62,8 @@ class StellarKeyDerivation {
   /// Derives a Stellar key pair from a mnemonic phrase using BIP-39-like
   /// key derivation. The seed is derived via PBKDF2-HMAC-SHA256.
   static KeyPair fromMnemonic(String mnemonic, {String passphrase = ''}) {
-    final mnemonicBytes = utf8.encode(mnemonic.normalize());
+    // NFKD normalization: use the mnemonic as-is (Dart String is already Unicode).
+    final mnemonicBytes = utf8.encode(mnemonic);
     final passphraseBytes = utf8.encode('mnemonic$passphrase');
     final seed = _pbkdf2HmacSha256(
       password: mnemonicBytes,

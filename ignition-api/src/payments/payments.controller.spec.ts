@@ -9,7 +9,7 @@ describe('PaymentsController', () => {
   beforeEach(async () => {
     service = {
       initiatePayment: jest.fn(),
-    } as any;
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PaymentsController],
@@ -29,7 +29,10 @@ describe('PaymentsController', () => {
       amount: '100',
       donorWalletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
     };
-    service.initiatePayment.mockResolvedValue({ id: 'payment-123', status: 'PENDING' } as any);
+    service.initiatePayment.mockResolvedValue({
+      id: 'payment-123',
+      status: 'PENDING',
+    } as any);
 
     const res = await controller.create(dto);
 

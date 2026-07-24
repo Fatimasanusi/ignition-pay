@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { HealthCheckService, HttpHealthIndicator, PrismaHealthIndicator } from '@nestjs/terminus';
+import {
+  HealthCheckService,
+  HttpHealthIndicator,
+  PrismaHealthIndicator,
+} from '@nestjs/terminus';
 import { ConfigService } from '@nestjs/config';
 import { HealthCheckError } from '@nestjs/terminus';
 import { HealthController } from './health.controller';
@@ -23,9 +27,9 @@ describe('Health Module', () => {
   let mockPrismaHealth: jest.Mocked<Pick<PrismaHealthIndicator, 'pingCheck'>>;
 
   beforeEach(async () => {
-    mockHealth = { check: jest.fn() } as any;
-    mockHttp = { pingCheck: jest.fn() } as any;
-    mockPrismaHealth = { pingCheck: jest.fn() } as any;
+    mockHealth = { check: jest.fn() };
+    mockHttp = { pingCheck: jest.fn() };
+    mockPrismaHealth = { pingCheck: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [HealthController],
@@ -40,7 +44,8 @@ describe('Health Module', () => {
           useValue: {
             get: jest.fn().mockImplementation((key, def) => {
               if (key === 'REDIS_URL') return 'redis://localhost:6379';
-              if (key === 'STELLAR_HORIZON_URL') return 'https://horizon.testnet.org';
+              if (key === 'STELLAR_HORIZON_URL')
+                return 'https://horizon.testnet.org';
               return def;
             }),
           },
@@ -62,7 +67,9 @@ describe('Health Module', () => {
 
     it('isHealthy() should throw HealthCheckError if ping fails', async () => {
       mockRedisClient.ping.mockRejectedValue(new Error('connection failed'));
-      await expect(redisIndicator.isHealthy('redis')).rejects.toThrow(HealthCheckError);
+      await expect(redisIndicator.isHealthy('redis')).rejects.toThrow(
+        HealthCheckError,
+      );
     });
   });
 
@@ -83,7 +90,9 @@ describe('Health Module', () => {
     });
 
     it('ready() should call check()', async () => {
-      const checkSpy = jest.spyOn(controller, 'check').mockResolvedValue({ status: 'ok' } as any);
+      const checkSpy = jest
+        .spyOn(controller, 'check')
+        .mockResolvedValue({ status: 'ok' } as any);
       const res = await controller.ready();
       expect(checkSpy).toHaveBeenCalled();
       expect(res).toEqual({ status: 'ok' });

@@ -26,6 +26,9 @@ dependencies:
     path: ../packages/core-dart
   meta: ^1.18.0
   crypto: ^3.0.7
+  sentry_flutter: ^8.0.0
+  firebase_crashlytics: ^4.0.0
+  logging: ^1.2.0
 
 dev_dependencies:
   # On-device end-to-end suite. Single entry point: integration_test/app_test.dart.

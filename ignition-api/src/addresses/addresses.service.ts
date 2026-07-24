@@ -26,7 +26,7 @@ export class AddressesService {
 
     if (dto.walletId) {
       const wallet = await this.prisma.wallet.findUnique({
-        where: { id: dto.walletId },
+        where: { id: dto.walletId, isActive: true },
       });
       if (!wallet) {
         throw new NotFoundException('Wallet not found');
@@ -56,7 +56,7 @@ export class AddressesService {
 
   async findOne(id: string): Promise<AddressResponseDto> {
     const address = await this.prisma.address.findUnique({
-      where: { id },
+      where: { id, isActive: true },
     });
     if (!address) {
       throw new NotFoundException('Address not found');
@@ -66,7 +66,7 @@ export class AddressesService {
 
   async findByAddress(addressStr: string): Promise<AddressResponseDto> {
     const address = await this.prisma.address.findUnique({
-      where: { address: addressStr },
+      where: { address: addressStr, isActive: true },
     });
     if (!address) {
       throw new NotFoundException('Address not found');
@@ -92,7 +92,7 @@ export class AddressesService {
 
     if (dto.walletId) {
       const wallet = await this.prisma.wallet.findUnique({
-        where: { id: dto.walletId },
+        where: { id: dto.walletId, isActive: true },
       });
       if (!wallet) {
         throw new NotFoundException('Wallet not found');
@@ -117,7 +117,7 @@ export class AddressesService {
 
   async remove(id: string): Promise<void> {
     const existing = await this.prisma.address.findUnique({
-      where: { id },
+      where: { id, isActive: true },
     });
     if (!existing) {
       throw new NotFoundException('Address not found');
@@ -151,16 +151,21 @@ export class AddressesService {
   async generate(userId: string, dto: GenerateAddressDto) {
     const { walletId, network = WalletNetwork.STELLAR, label } = dto;
 
-    const wallet = await this.prisma.wallet.findUnique({ where: { id: walletId } });
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { id: walletId, isActive: true },
+    });
     if (!wallet) throw new NotFoundException('Wallet not found');
-    if (wallet.userId !== userId) throw new NotFoundException('Wallet not found');
+    if (wallet.userId !== userId)
+      throw new NotFoundException('Wallet not found');
 
     // Generate a unique Stellar keypair address
     let address: string;
     let attempts = 0;
     do {
       address = StellarSdk.Keypair.random().publicKey();
-      const existing = await this.prisma.depositAddress.findUnique({ where: { address } });
+      const existing = await this.prisma.depositAddress.findUnique({
+        where: { address },
+      });
       if (!existing) break;
       attempts++;
     } while (attempts < 5);
@@ -185,8 +190,11 @@ export class AddressesService {
   }
 
   async listByWallet(userId: string, walletId: string) {
-    const wallet = await this.prisma.wallet.findUnique({ where: { id: walletId } });
-    if (!wallet || wallet.userId !== userId) throw new NotFoundException('Wallet not found');
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { id: walletId, isActive: true },
+    });
+    if (!wallet || wallet.userId !== userId)
+      throw new NotFoundException('Wallet not found');
 
     return this.prisma.depositAddress.findMany({
       where: { walletId },

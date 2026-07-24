@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="ignition_mobile"
+        android:label="Ignition Pay"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

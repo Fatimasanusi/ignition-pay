@@ -30,13 +30,13 @@ export class ApiKeyGuard implements CanActivate {
     const keyHash = createHash('sha256').update(apiKey).digest('hex');
 
     const record = await this.prisma.apiKey.findUnique({
-      where: { keyHash },
+      where: { keyHash, isActive: true },
       include: {
         user: { select: { id: true, walletAddress: true, role: true } },
       },
     });
 
-    if (!record || !record.isActive) {
+    if (!record) {
       throw new UnauthorizedException('Invalid or revoked API key');
     }
 

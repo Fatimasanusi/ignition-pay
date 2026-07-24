@@ -1,4 +1,9 @@
-import { Module, NestModule, MiddlewareConsumer, OnModuleInit } from '@nestjs/common';
+import {
+  Module,
+  NestModule,
+  MiddlewareConsumer,
+  OnModuleInit,
+} from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
@@ -63,7 +68,9 @@ import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
   ],
 })
 export class AppModule implements NestModule, OnModuleInit {
-  constructor(private readonly apiKeyExpirationService: ApiKeyExpirationService) {}
+  constructor(
+    private readonly apiKeyExpirationService: ApiKeyExpirationService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.apiKeyExpirationService.deactivateExpiredKeys();

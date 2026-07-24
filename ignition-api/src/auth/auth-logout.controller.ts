@@ -70,6 +70,10 @@ export class AuthLogoutController {
 
     const { userId, sessionId, walletAddress } = req.user;
 
+    // Blacklist the access token so JwtAuthGuard-protected endpoints
+    // (e.g. GET /users/me) reject it immediately — not just SessionGuard.
+    await this.tokenService.blacklistAccessToken(sessionId);
+
     // Revoke the session so the access token can't be used any more.
     await this.sessionService.revokeSession(userId, sessionId);
 

@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { UnauthorizedException } from '@nestjs/common';
 import { UsersController, AdminUsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { PermissionsService } from '../auth/permissions/permissions.service';
@@ -8,20 +9,24 @@ import { UserRole, KycStatus } from '@prisma/client';
 describe('UsersController & AdminUsersController', () => {
   let usersController: UsersController;
   let adminUsersController: AdminUsersController;
-  let usersService: jest.Mocked<Pick<
-    UsersService,
-    | 'register'
-    | 'confirmEmail'
-    | 'login'
-    | 'setupPassword'
-    | 'changePassword'
-    | 'getMyProfile'
-    | 'updateMyProfile'
-    | 'getPublicProfile'
-    | 'updateKYCStatus'
-    | 'updateUserRole'
-  >>;
-  let permissionsService: jest.Mocked<Pick<PermissionsService, 'getUserPermissions'>>;
+  let usersService: jest.Mocked<
+    Pick<
+      UsersService,
+      | 'register'
+      | 'confirmEmail'
+      | 'login'
+      | 'setupPassword'
+      | 'changePassword'
+      | 'getMyProfile'
+      | 'updateMyProfile'
+      | 'getPublicProfile'
+      | 'updateKYCStatus'
+      | 'updateUserRole'
+    >
+  >;
+  let permissionsService: jest.Mocked<
+    Pick<PermissionsService, 'getUserPermissions'>
+  >;
 
   beforeEach(async () => {
     usersService = {
@@ -35,11 +40,11 @@ describe('UsersController & AdminUsersController', () => {
       getPublicProfile: jest.fn(),
       updateKYCStatus: jest.fn(),
       updateUserRole: jest.fn(),
-    } as any;
+    };
 
     permissionsService = {
       getUserPermissions: jest.fn(),
-    } as any;
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [UsersController, AdminUsersController],
@@ -51,7 +56,8 @@ describe('UsersController & AdminUsersController', () => {
     }).compile();
 
     usersController = module.get<UsersController>(UsersController);
-    adminUsersController = module.get<AdminUsersController>(AdminUsersController);
+    adminUsersController =
+      module.get<AdminUsersController>(AdminUsersController);
   });
 
   it('should be defined', () => {
@@ -61,10 +67,18 @@ describe('UsersController & AdminUsersController', () => {
 
   describe('UsersController', () => {
     it('register() should call usersService.register', async () => {
-      const dto = { email: 'test@example.com', walletAddress: 'G123', password: 'Password123!' };
+      const dto = {
+        email: 'test@example.com',
+        walletAddress: 'G123',
+        password: 'Password123!',
+      };
       usersService.register.mockResolvedValue({ id: 'user-1' } as any);
       const res = await usersController.register(dto);
-      expect(usersService.register).toHaveBeenCalledWith(dto.email, dto.walletAddress, dto.password);
+      expect(usersService.register).toHaveBeenCalledWith(
+        dto.email,
+        dto.walletAddress,
+        dto.password,
+      );
       expect(res).toEqual({ id: 'user-1' });
     });
 
@@ -78,7 +92,10 @@ describe('UsersController & AdminUsersController', () => {
 
     it('login() should call usersService.login', async () => {
       const dto = { email: 'test@example.com', password: 'Password123!' };
-      usersService.login.mockResolvedValue({ accessToken: 'access', refreshToken: 'refresh' } as any);
+      usersService.login.mockResolvedValue({
+        accessToken: 'access',
+        refreshToken: 'refresh',
+      } as any);
       const res = await usersController.login(dto);
       expect(usersService.login).toHaveBeenCalledWith(dto.email, dto.password);
       expect(res).toEqual({ accessToken: 'access', refreshToken: 'refresh' });
@@ -99,7 +116,10 @@ describe('UsersController & AdminUsersController', () => {
 
     it('changePassword() should call usersService.changePassword', async () => {
       const req = { user: { sub: 'user-1', walletAddress: 'G123' } };
-      const dto = { currentPassword: 'OldPassword123!', newPassword: 'NewPassword123!' };
+      const dto = {
+        currentPassword: 'OldPassword123!',
+        newPassword: 'NewPassword123!',
+      };
       usersService.changePassword.mockResolvedValue({ success: true } as any);
       const res = await usersController.changePassword(req, dto);
       expect(usersService.changePassword).toHaveBeenCalledWith({
@@ -113,7 +133,10 @@ describe('UsersController & AdminUsersController', () => {
 
     it('getMyProfile() should call usersService.getMyProfile', async () => {
       const req = { user: { walletAddress: 'G123' } };
-      usersService.getMyProfile.mockResolvedValue({ id: 'user-1', email: 'test@example.com' } as any);
+      usersService.getMyProfile.mockResolvedValue({
+        id: 'user-1',
+        email: 'test@example.com',
+      } as any);
       const res = await usersController.getMyProfile(req);
       expect(usersService.getMyProfile).toHaveBeenCalledWith('G123');
       expect(res).toEqual({ id: 'user-1', email: 'test@example.com' });
@@ -123,16 +146,24 @@ describe('UsersController & AdminUsersController', () => {
       const req = { user: { role: 'USER' } };
       permissionsService.getUserPermissions.mockReturnValue(['read' as any]);
       const res = usersController.getMyPermissions(req);
-      expect(permissionsService.getUserPermissions).toHaveBeenCalledWith('USER');
+      expect(permissionsService.getUserPermissions).toHaveBeenCalledWith(
+        'USER',
+      );
       expect(res).toEqual(['read']);
     });
 
     it('updateMyProfile() should call usersService.updateMyProfile', async () => {
       const req = { user: { walletAddress: 'G123' } };
       const updateDto = { displayName: 'New Name' };
-      usersService.updateMyProfile.mockResolvedValue({ id: 'user-1', displayName: 'New Name' } as any);
+      usersService.updateMyProfile.mockResolvedValue({
+        id: 'user-1',
+        displayName: 'New Name',
+      } as any);
       const res = await usersController.updateMyProfile(req, updateDto);
-      expect(usersService.updateMyProfile).toHaveBeenCalledWith('G123', updateDto);
+      expect(usersService.updateMyProfile).toHaveBeenCalledWith(
+        'G123',
+        updateDto,
+      );
       expect(res).toEqual({ id: 'user-1', displayName: 'New Name' });
     });
 
@@ -149,12 +180,17 @@ describe('UsersController & AdminUsersController', () => {
       const updateDto = { displayName: 'New Name' };
       usersService.updateMyProfile.mockResolvedValue({ id: 'user-1' } as any);
       const res = await usersController.putProfile(req, updateDto);
-      expect(usersService.updateMyProfile).toHaveBeenCalledWith('G123', updateDto);
+      expect(usersService.updateMyProfile).toHaveBeenCalledWith(
+        'G123',
+        updateDto,
+      );
       expect(res).toEqual({ id: 'user-1' });
     });
 
     it('getPublicProfile() should call usersService.getPublicProfile', async () => {
-      usersService.getPublicProfile.mockResolvedValue({ displayName: 'Public User' } as any);
+      usersService.getPublicProfile.mockResolvedValue({
+        displayName: 'Public User',
+      } as any);
       const res = await usersController.getPublicProfile('G123');
       expect(usersService.getPublicProfile).toHaveBeenCalledWith('G123');
       expect(res).toEqual({ displayName: 'Public User' });
@@ -165,19 +201,93 @@ describe('UsersController & AdminUsersController', () => {
     it('updateKYCStatus() should call usersService.updateKYCStatus', async () => {
       const req = { user: { walletAddress: 'GAdmin' } };
       const dto = { status: KycStatus.VERIFIED };
-      usersService.updateKYCStatus.mockResolvedValue({ success: true, message: 'KYC verified' });
-      const res = await adminUsersController.updateKYCStatus('user-1', dto, req);
-      expect(usersService.updateKYCStatus).toHaveBeenCalledWith('user-1', KycStatus.VERIFIED, 'GAdmin');
+      usersService.updateKYCStatus.mockResolvedValue({
+        success: true,
+        message: 'KYC verified',
+      });
+      const res = await adminUsersController.updateKYCStatus(
+        'user-1',
+        dto,
+        req,
+      );
+      expect(usersService.updateKYCStatus).toHaveBeenCalledWith(
+        'user-1',
+        KycStatus.VERIFIED,
+        'GAdmin',
+      );
       expect(res).toEqual({ success: true, message: 'KYC verified' });
     });
 
     it('updateUserRole() should call usersService.updateUserRole', async () => {
       const req = { user: { sub: 'admin-1' } };
       const dto = { role: UserRole.ADMIN };
-      usersService.updateUserRole.mockResolvedValue({ success: true, message: 'Role updated' });
+      usersService.updateUserRole.mockResolvedValue({
+        success: true,
+        message: 'Role updated',
+      });
       const res = await adminUsersController.updateUserRole('user-1', dto, req);
-      expect(usersService.updateUserRole).toHaveBeenCalledWith('user-1', UserRole.ADMIN, 'admin-1');
+      expect(usersService.updateUserRole).toHaveBeenCalledWith(
+        'user-1',
+        UserRole.ADMIN,
+        'admin-1',
+      );
       expect(res).toEqual({ success: true, message: 'Role updated' });
+    });
+  });
+
+  // Issue #127 & #128: defensive walletAddress handling and missing coverage
+  describe('defensive walletAddress handling (Issue #127)', () => {
+    it('getMyProfile() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: {} };
+      await expect(usersController.getMyProfile(req as any)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('updateMyProfile() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: {} };
+      await expect(
+        usersController.updateMyProfile(req as any, { displayName: 'Test' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('getProfile() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: {} };
+      await expect(usersController.getProfile(req as any)).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('putProfile() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: {} };
+      await expect(
+        usersController.putProfile(req as any, { displayName: 'Test' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('setupPassword() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: { sub: 'user-1' } };
+      await expect(
+        usersController.setupPassword(req as any, { password: 'Pass123!' }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('changePassword() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: { sub: 'user-1' } };
+      await expect(
+        usersController.changePassword(req as any, {
+          currentPassword: 'Old1!',
+          newPassword: 'New1!',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('updateKYCStatus() throws UnauthorizedException when walletAddress is missing', async () => {
+      const req = { user: {} };
+      const dto = { status: KycStatus.VERIFIED };
+      await expect(
+        adminUsersController.updateKYCStatus('user-1', dto, req as any),
+      ).rejects.toThrow(UnauthorizedException);
     });
   });
 });

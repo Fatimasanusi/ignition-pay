@@ -31,7 +31,7 @@ export class JwtMiddleware implements NestMiddleware {
           'JWT_SECRET',
           'stellaraid-default-secret',
         ),
-      }) as Record<string, unknown>;
+      });
       req.user = payload;
       next();
     } catch (error) {

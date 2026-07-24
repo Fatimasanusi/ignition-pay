@@ -75,11 +75,7 @@ export class CryptoService {
    * Decrypt a secretbox ciphertext.
    * Throws if authentication fails (tampered data / wrong key).
    */
-  decrypt(
-    ciphertextB64: string,
-    nonceB64: string,
-    key: Uint8Array,
-  ): string {
+  decrypt(ciphertextB64: string, nonceB64: string, key: Uint8Array): string {
     const box = Buffer.from(ciphertextB64, 'base64');
     const nonce = Buffer.from(nonceB64, 'base64');
     const plaintext = nacl.secretbox.open(box, nonce, key);

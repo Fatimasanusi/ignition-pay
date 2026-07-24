@@ -123,7 +123,11 @@ export class UsersService {
 
     if (updateDto.email && updateDto.email !== user.email) {
       const existing = await this.prisma.user.findUnique({
-        where: { email: updateDto.email },
+        where: {
+          email: updateDto.email,
+          deletedAt: null,
+          NOT: { id: user.id },
+        },
       });
       if (existing) {
         throw new BadRequestException('Email already in use');
@@ -470,14 +474,14 @@ export class UsersService {
     password: string,
   ): Promise<RegisterResponseDto> {
     const existingEmail = await this.prisma.user.findUnique({
-      where: { email },
+      where: { email, deletedAt: null },
     });
     if (existingEmail) {
       throw new BadRequestException('Email already in use');
     }
 
     const existingWallet = await this.prisma.user.findUnique({
-      where: { walletAddress },
+      where: { walletAddress, deletedAt: null },
     });
     if (existingWallet) {
       throw new BadRequestException('Wallet address already in use');
@@ -539,7 +543,7 @@ export class UsersService {
     const tokenHash = this.hashToken(token);
 
     const verification = await this.prisma.emailVerificationToken.findUnique({
-      where: { tokenHash },
+      where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() } },
       include: { user: true },
     });
 

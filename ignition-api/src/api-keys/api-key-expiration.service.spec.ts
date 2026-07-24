@@ -18,7 +18,10 @@ describe('ApiKeyExpirationService', () => {
       get: jest.fn().mockReturnValue('3600000'),
     };
 
-    service = new ApiKeyExpirationService(prisma as never, config as unknown as ConfigService);
+    service = new ApiKeyExpirationService(
+      prisma as never,
+      config as unknown as ConfigService,
+    );
   });
 
   it('deactivates stale keys based on the configured TTL', async () => {

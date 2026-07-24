@@ -1,22 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ApiKeyGuard } from './api-key.guard';
+import { ApiKeyExpirationService } from './api-key-expiration.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createHash } from 'crypto';
 
 describe('ApiKeyGuard', () => {
   let guard: ApiKeyGuard;
   let prisma: { apiKey: { findUnique: jest.Mock } };
+  let expirationService: { touchUsage: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
       apiKey: { findUnique: jest.fn() },
+    };
+    expirationService = {
+      touchUsage: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ApiKeyGuard,
         { provide: PrismaService, useValue: prisma },
+        { provide: ApiKeyExpirationService, useValue: expirationService },
       ],
     }).compile();
 
@@ -56,7 +62,7 @@ describe('ApiKeyGuard', () => {
       new UnauthorizedException('Invalid or revoked API key'),
     );
 
-    prisma.apiKey.findUnique.mockResolvedValue({ isActive: false });
+    prisma.apiKey.findUnique.mockResolvedValue(null);
 
     await expect(guard.canActivate(context)).rejects.toThrow(
       new UnauthorizedException('Invalid or revoked API key'),
@@ -98,8 +104,10 @@ describe('ApiKeyGuard', () => {
     });
     const keyHash = createHash('sha256').update('my-key').digest('hex');
     expect(prisma.apiKey.findUnique).toHaveBeenCalledWith({
-      where: { keyHash },
-      include: { user: { select: { id: true, walletAddress: true, role: true } } },
+      where: { keyHash, isActive: true },
+      include: {
+        user: { select: { id: true, walletAddress: true, role: true } },
+      },
     });
   });
 });

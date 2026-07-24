@@ -3,7 +3,7 @@ name: ci-flutter
 on:
   pull_request:
     paths:
-      - apps/mobile/**
+      - ignition-mobile/**
       - packages/**
   push:
     branches: [main]
@@ -19,12 +19,12 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ matrix.channel }}
-      - run: cd apps/mobile && flutter pub get
-      - run: cd apps/mobile && flutter test --coverage
+      - run: cd ignition-mobile && flutter pub get
+      - run: cd ignition-mobile && flutter test --coverage
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: apps/mobile/coverage/lcov.info
+          file: ignition-mobile/coverage/lcov.info
           flags: flutter
 
   test-web:
@@ -36,7 +36,7 @@ jobs:
           channel: stable
       - id: setup-chrome
         uses: browser-actions/setup-chrome@v1
-      - run: cd apps/mobile && flutter pub get
-      - run: cd apps/mobile && flutter test --platform chrome
+      - run: cd ignition-mobile && flutter pub get
+      - run: cd ignition-mobile && flutter test --platform chrome
         env:
           CHROME_EXECUTABLE: ${{ steps.setup-chrome.outputs.chrome-path }}

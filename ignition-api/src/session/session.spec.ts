@@ -7,6 +7,7 @@ import Keyv from 'keyv';
 import { SessionService, SessionMetadata } from './session.service';
 import { SessionController } from './session.controller';
 import { SessionGuard } from './session.guard';
+import { PermissionsService } from '../auth/permissions/permissions.service';
 
 describe('Session Module', () => {
   let sessionService: SessionService;
@@ -34,7 +35,7 @@ describe('Session Module', () => {
 
     mockJwt = {
       verify: jest.fn(),
-    } as any;
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SessionController],
@@ -44,6 +45,9 @@ describe('Session Module', () => {
         { provide: CACHE_MANAGER, useValue: mockCache },
         { provide: ConfigService, useValue: mockConfig },
         { provide: JwtService, useValue: mockJwt },
+        // Issue #230 — SessionGuard now depends on PermissionsService to
+        // resolve the JWT `scope` claim into req.user.scopes.
+        PermissionsService,
       ],
     }).compile();
 
@@ -62,10 +66,15 @@ describe('Session Module', () => {
 
     it('should create and save a session', async () => {
       mockCache.get.mockResolvedValue(null);
-      const params = { userId: 'u1', walletAddress: 'w1', role: 'USER', ipAddress: '127.0.0.1' };
-      
+      const params = {
+        userId: 'u1',
+        walletAddress: 'w1',
+        role: 'USER',
+        ipAddress: '127.0.0.1',
+      };
+
       const session = await sessionService.createSession(params);
-      
+
       expect(session.userId).toEqual(params.userId);
       expect(session.walletAddress).toEqual(params.walletAddress);
       expect(mockCache.set).toHaveBeenCalledTimes(2); // once for session, once for user index
@@ -174,22 +183,52 @@ describe('Session Module', () => {
     it('listSessions() should return formatted sessions', async () => {
       const req = { user: { userId: 'u1', sessionId: 's1' } } as any;
       const mockSessions = [
-        { sessionId: 's1', userId: 'u1', createdAt: 1, lastSeenAt: 2, expiresAt: 3 } as any,
-        { sessionId: 's2', userId: 'u1', createdAt: 1, lastSeenAt: 2, expiresAt: 3 } as any,
+        {
+          sessionId: 's1',
+          userId: 'u1',
+          createdAt: 1,
+          lastSeenAt: 2,
+          expiresAt: 3,
+        } as any,
+        {
+          sessionId: 's2',
+          userId: 'u1',
+          createdAt: 1,
+          lastSeenAt: 2,
+          expiresAt: 3,
+        } as any,
       ];
-      jest.spyOn(sessionService, 'getActiveSessions').mockResolvedValue(mockSessions);
+      jest
+        .spyOn(sessionService, 'getActiveSessions')
+        .mockResolvedValue(mockSessions);
 
       const res = await sessionController.listSessions(req);
       expect(res).toEqual([
-        { sessionId: 's1', createdAt: 1, lastSeenAt: 2, expiresAt: 3, isCurrent: true },
-        { sessionId: 's2', createdAt: 1, lastSeenAt: 2, expiresAt: 3, isCurrent: false },
+        {
+          sessionId: 's1',
+          createdAt: 1,
+          lastSeenAt: 2,
+          expiresAt: 3,
+          isCurrent: true,
+        },
+        {
+          sessionId: 's2',
+          createdAt: 1,
+          lastSeenAt: 2,
+          expiresAt: 3,
+          isCurrent: false,
+        },
       ]);
     });
 
     it('revokeSession() should revoke session if it belongs to user', async () => {
       const req = { user: { userId: 'u1', sessionId: 's1' } } as any;
-      jest.spyOn(sessionService, 'getSession').mockResolvedValue({ userId: 'u1', sessionId: 's2' } as any);
-      const revokeSpy = jest.spyOn(sessionService, 'revokeSession').mockResolvedValue(undefined);
+      jest
+        .spyOn(sessionService, 'getSession')
+        .mockResolvedValue({ userId: 'u1', sessionId: 's2' } as any);
+      const revokeSpy = jest
+        .spyOn(sessionService, 'revokeSession')
+        .mockResolvedValue(undefined);
 
       await sessionController.revokeSession(req, 's2');
       expect(revokeSpy).toHaveBeenCalledWith('u1', 's2');
@@ -204,7 +243,9 @@ describe('Session Module', () => {
 
     it('revokeAllSessions() should revoke all user sessions', async () => {
       const req = { user: { userId: 'u1' } } as any;
-      const revokeSpy = jest.spyOn(sessionService, 'revokeAllSessions').mockResolvedValue(undefined);
+      const revokeSpy = jest
+        .spyOn(sessionService, 'revokeAllSessions')
+        .mockResolvedValue(undefined);
 
       await sessionController.revokeAllSessions(req);
       expect(revokeSpy).toHaveBeenCalledWith('u1');
@@ -252,7 +293,11 @@ describe('Session Module', () => {
 
     it('should throw UnauthorizedException if token lacks session id', async () => {
       mockRequest.headers['authorization'] = 'Bearer valid';
-      mockJwt.verify.mockReturnValue({ sub: 'u1', walletAddress: 'w1', role: 'USER' });
+      mockJwt.verify.mockReturnValue({
+        sub: 'u1',
+        walletAddress: 'w1',
+        role: 'USER',
+      });
 
       await expect(sessionGuard.canActivate(mockContext)).rejects.toThrow(
         new UnauthorizedException('Token is missing session identifier'),
@@ -261,7 +306,12 @@ describe('Session Module', () => {
 
     it('should throw UnauthorizedException if session is not active in cache', async () => {
       mockRequest.headers['authorization'] = 'Bearer valid';
-      mockJwt.verify.mockReturnValue({ sub: 'u1', walletAddress: 'w1', role: 'USER', sid: 's1' });
+      mockJwt.verify.mockReturnValue({
+        sub: 'u1',
+        walletAddress: 'w1',
+        role: 'USER',
+        sid: 's1',
+      });
       jest.spyOn(sessionService, 'getSession').mockResolvedValue(null);
 
       await expect(sessionGuard.canActivate(mockContext)).rejects.toThrow(
@@ -271,19 +321,37 @@ describe('Session Module', () => {
 
     it('should return true and attach user if session is active', async () => {
       mockRequest.headers['authorization'] = 'Bearer valid';
-      mockJwt.verify.mockReturnValue({ sub: 'u1', walletAddress: 'w1', role: 'USER', sid: 's1' });
-      jest.spyOn(sessionService, 'getSession').mockResolvedValue({ userId: 'u1', sessionId: 's1' } as any);
-      const touchSpy = jest.spyOn(sessionService, 'touchSession').mockResolvedValue(undefined);
-
-      const res = await sessionGuard.canActivate(mockContext);
-      
-      expect(res).toBe(true);
-      expect(mockRequest.user).toEqual({
-        userId: 'u1',
+      mockJwt.verify.mockReturnValue({
+        sub: 'u1',
         walletAddress: 'w1',
         role: 'USER',
-        sessionId: 's1',
+        sid: 's1',
       });
+      jest
+        .spyOn(sessionService, 'getSession')
+        .mockResolvedValue({ userId: 'u1', sessionId: 's1' } as any);
+      const touchSpy = jest
+        .spyOn(sessionService, 'touchSession')
+        .mockResolvedValue(undefined);
+
+      const res = await sessionGuard.canActivate(mockContext);
+
+      expect(res).toBe(true);
+      // Issue #230 — SessionGuard now also attaches `scopes`, derived
+      // from the role (no `scope` claim on this legacy token). Pin the
+      // shape with objectContaining so future fields don't break this test,
+      // but ALSO assert one USER-role permission is present so a silent
+      // regression to empty scopes would be caught.
+      expect(mockRequest.user).toEqual(
+        expect.objectContaining({
+          userId: 'u1',
+          walletAddress: 'w1',
+          role: 'USER',
+          sessionId: 's1',
+          scopes: expect.any(Array),
+        }),
+      );
+      expect(mockRequest.user.scopes).toContain('wallet:read');
       expect(touchSpy).toHaveBeenCalledWith('s1');
     });
   });

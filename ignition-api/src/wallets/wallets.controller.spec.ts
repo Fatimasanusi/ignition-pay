@@ -6,19 +6,24 @@ import { PermissionsService } from '../auth/permissions/permissions.service';
 
 describe('WalletsController', () => {
   let controller: WalletsController;
-  let service: jest.Mocked<Pick<WalletsService, 'createWallet' | 'getBalanceAndRecentTransactions'>>;
+  let service: jest.Mocked<
+    Pick<WalletsService, 'createWallet' | 'getBalanceAndRecentTransactions'>
+  >;
 
   beforeEach(async () => {
     service = {
       createWallet: jest.fn(),
       getBalanceAndRecentTransactions: jest.fn(),
-    } as any;
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [WalletsController],
       providers: [
         { provide: WalletsService, useValue: service },
-        { provide: PermissionsService, useValue: { getUserPermissions: jest.fn() } },
+        {
+          provide: PermissionsService,
+          useValue: { getUserPermissions: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -39,7 +44,10 @@ describe('WalletsController', () => {
         dailyLimit: 1000,
         monthlyLimit: 10000,
       };
-      service.createWallet.mockResolvedValue({ id: 'wallet-123', ...dto } as any);
+      service.createWallet.mockResolvedValue({
+        id: 'wallet-123',
+        ...dto,
+      } as any);
 
       const res = await controller.createWallet(req, dto);
 
@@ -50,11 +58,16 @@ describe('WalletsController', () => {
 
   describe('getBalance', () => {
     it('should call walletsService.getBalanceAndRecentTransactions', async () => {
-      service.getBalanceAndRecentTransactions.mockResolvedValue({ balance: '100', transactions: [] } as any);
+      service.getBalanceAndRecentTransactions.mockResolvedValue({
+        balance: '100',
+        transactions: [],
+      } as any);
 
       const res = await controller.getBalance('wallet-123');
 
-      expect(service.getBalanceAndRecentTransactions).toHaveBeenCalledWith('wallet-123');
+      expect(service.getBalanceAndRecentTransactions).toHaveBeenCalledWith(
+        'wallet-123',
+      );
       expect(res).toEqual({ balance: '100', transactions: [] });
     });
 

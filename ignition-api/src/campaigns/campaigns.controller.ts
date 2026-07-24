@@ -13,7 +13,12 @@ import {
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/permissions/permissions.guard';
@@ -82,8 +87,13 @@ export class CampaignsController {
    * Cached for 30 seconds
    */
   @Get()
-  @ApiOperation({ summary: 'Browse public campaigns with filtering and sorting' })
-  @ApiResponse({ status: 200, description: 'List of campaigns matching criteria' })
+  @ApiOperation({
+    summary: 'Browse public campaigns with filtering and sorting',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of campaigns matching criteria',
+  })
   async browseCampaigns(
     @Query() query: BrowseCampaignsQueryDto,
   ): Promise<BrowseCampaignsResponseDto> {

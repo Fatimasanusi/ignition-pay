@@ -22,6 +22,11 @@ import { PermissionsGuard } from '../auth/permissions/permissions.guard';
     }),
   ],
   controllers: [WalletsController],
-  providers: [WalletsService, JwtAuthGuard, PermissionsService, PermissionsGuard],
+  providers: [
+    WalletsService,
+    JwtAuthGuard,
+    PermissionsService,
+    PermissionsGuard,
+  ],
 })
 export class WalletsModule {}

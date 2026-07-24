@@ -87,7 +87,10 @@ describe('RolesGuard', () => {
       }),
     } as unknown as ExecutionContext;
 
-    prisma.user.findFirst.mockResolvedValue({ id: 'u-123', role: UserRole.USER });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'u-123',
+      role: UserRole.USER,
+    });
 
     await expect(guard.canActivate(context)).rejects.toThrow(
       new ForbiddenException('Forbidden resource: insufficient permissions'),
@@ -107,7 +110,10 @@ describe('RolesGuard', () => {
       }),
     } as unknown as ExecutionContext;
 
-    prisma.user.findFirst.mockResolvedValue({ id: 'u-123', role: UserRole.ADMIN });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'u-123',
+      role: UserRole.ADMIN,
+    });
 
     const res = await guard.canActivate(context);
     expect(res).toBe(true);

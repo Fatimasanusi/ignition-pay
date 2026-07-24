@@ -15,7 +15,9 @@ export class ApiKeyExpirationService {
     const configured = this.config.get<string>('API_KEY_TTL_MS');
     const parsed = Number(configured ?? 30 * 24 * 60 * 60 * 1000);
 
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 24 * 60 * 60 * 1000;
+    return Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : 30 * 24 * 60 * 60 * 1000;
   }
 
   async deactivateExpiredKeys(): Promise<number> {
@@ -25,10 +27,7 @@ export class ApiKeyExpirationService {
     const result = await this.prisma.apiKey.updateMany({
       where: {
         isActive: true,
-        OR: [
-          { expiresAt: { lte: now } },
-          { lastUsedAt: { lte: cutoff } },
-        ],
+        OR: [{ expiresAt: { lte: now } }, { lastUsedAt: { lte: cutoff } }],
       },
       data: {
         isActive: false,

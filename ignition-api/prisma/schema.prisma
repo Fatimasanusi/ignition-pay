@@ -155,6 +155,10 @@ model User {
   @@index([isActive])
   @@index([kycStatus])
   @@index([deletedAt])
+  // Compound indexes for common filtered lookups
+  @@index([email, deletedAt])
+  @@index([walletAddress, deletedAt])
+  @@index([id, isActive, deletedAt])
   @@map("users")
 }
 
@@ -190,6 +194,8 @@ model ApiKey {
   @@unique([prefix, isActive])
   @@index([userId])
   @@index([isActive, expiresAt])
+  // Covering index for the guard's findUnique(keyHash, isActive) lookup
+  @@index([keyHash, isActive])
   @@map("api_keys")
 }
 
@@ -220,6 +226,8 @@ model Campaign {
   @@index([status])
   @@index([createdAt])
   @@index([category])
+  // Compound index to support updateCampaign's status-filtered findUnique
+  @@index([id, status])
   @@map("campaigns")
 }
 
@@ -371,6 +379,8 @@ model EmailVerificationToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  // Compound index to support confirmEmail's filtered findUnique(tokenHash, usedAt, expiresAt)
+  @@index([tokenHash, usedAt, expiresAt])
   @@map("email_verification_tokens")
 }
 
@@ -424,6 +434,9 @@ model Wallet {
   @@index([depositAddress])
   @@index([network])
   @@index([status])
+  // Compound indexes for id+isActive guard lookups (addresses service, wallets service)
+  @@index([id, isActive])
+  @@index([userId, isActive])
   @@map("wallets")
 }
 
@@ -485,6 +498,9 @@ model Address {
   @@index([isActive])
   @@index([allocatedAt])
   @@index([lastActivityAt])
+  // Compound indexes for stricter findUnique(address, isActive) and findUnique(id, isActive) queries
+  @@index([address, isActive])
+  @@index([id, isActive])
   @@map("addresses")
 }
 

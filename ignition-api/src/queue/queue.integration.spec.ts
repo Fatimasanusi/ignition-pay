@@ -74,11 +74,13 @@ describe('Queue processors integration', () => {
       return { finished: jest.fn().mockResolvedValue(undefined) };
     });
 
-    contractEventsQueue.add = jest.fn().mockImplementation(async (name, data) => {
-      const processor = moduleRef.get(ContractEventsProcessor);
-      await processor.handleEvent({ data } as any);
-      return { finished: jest.fn().mockResolvedValue(undefined) };
-    });
+    contractEventsQueue.add = jest
+      .fn()
+      .mockImplementation(async (name, data) => {
+        const processor = moduleRef.get(ContractEventsProcessor);
+        await processor.handleEvent({ data } as any);
+        return { finished: jest.fn().mockResolvedValue(undefined) };
+      });
 
     analyticsQueue.add = jest.fn().mockImplementation(async (name, data) => {
       const processor = moduleRef.get(AnalyticsProcessor);
