@@ -1,8 +1,10 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, UseFilters } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ChallengeQueryDto } from './dto/challenge-query.dto';
 import { AuthChallengeService } from './auth-challenge.service';
+import { AuthExceptionFilter } from './filters/auth-exception.filter';
+import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 
 interface ChallengeResponse {
   challenge: string;
@@ -10,6 +12,7 @@ interface ChallengeResponse {
 
 @ApiTags('auth')
 @Controller('auth')
+@UseFilters(AuthExceptionFilter)
 @Throttle({ strict: { limit: 5, ttl: 60_000 } })
 export class AuthChallengeController {
   constructor(private readonly challengeService: AuthChallengeService) {}
@@ -17,7 +20,11 @@ export class AuthChallengeController {
   @Get('challenge')
   @ApiOperation({ summary: 'Get authentication challenge for wallet address' })
   @ApiResponse({ status: 200, description: 'Returns challenge string' })
-  @ApiResponse({ status: 400, description: 'Invalid Stellar wallet address' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid Stellar wallet address',
+    type: AuthErrorResponseDto,
+  })
   async getChallenge(
     @Query() query: ChallengeQueryDto,
   ): Promise<ChallengeResponse> {

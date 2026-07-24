@@ -4,6 +4,7 @@ import {
   Controller,
   Post,
   UnauthorizedException,
+  UseFilters,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ConfigService } from '@nestjs/config';
@@ -23,6 +24,8 @@ import { AuthChallengeService } from './auth-challenge.service';
 import { SessionService } from '../session/session.service';
 import { AuthTokenService } from './auth-token.service';
 import { LoginResponseDto } from '../users/dto/login.dto';
+import { AuthExceptionFilter } from './filters/auth-exception.filter';
+import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 
 export class VerifyDto {
   @ApiProperty({ example: 'G...wallet-address' })
@@ -63,6 +66,7 @@ export class AuthResponse {
  */
 @ApiTags('auth')
 @Controller('auth')
+@UseFilters(AuthExceptionFilter)
 @Throttle({ strict: { limit: 5, ttl: 60_000 } })
 export class AuthVerifyController {
   constructor(
@@ -80,13 +84,23 @@ export class AuthVerifyController {
     description: 'Successful login',
     type: AuthResponse,
   })
-  @ApiResponse({ status: 400, description: 'Invalid payload' })
-  @ApiResponse({ status: 401, description: 'Signature verification failed' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid payload',
+    type: AuthErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Signature verification failed',
+    type: AuthErrorResponseDto,
+  })
   async verify(@Body() dto: VerifyDto): Promise<AuthResponse> {
     const { walletAddress, signedChallenge, challenge } = dto;
 
     if (!walletAddress || !signedChallenge || !challenge) {
-      throw new BadRequestException('walletAddress, signedChallenge, and challenge are required');
+      throw new BadRequestException(
+        'walletAddress, signedChallenge, and challenge are required',
+      );
     }
 
     if (!StrKey.isValidEd25519PublicKey(walletAddress)) {
@@ -114,7 +128,9 @@ export class AuthVerifyController {
     // Validate all admin wallet addresses (extra layer, though already validated at startup)
     for (const wallet of adminWallets) {
       if (!StrKey.isValidEd25519PublicKey(wallet)) {
-        throw new Error(`Invalid Stellar public key in ADMIN_WALLETS: "${wallet}"`);
+        throw new Error(
+          `Invalid Stellar public key in ADMIN_WALLETS: "${wallet}"`,
+        );
       }
     }
 
