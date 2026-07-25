@@ -1,63 +1,46 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
-import { UnprocessableEntityException } from '@nestjs/common';
-import { WalletLimitService } from './wallet-limit.service';
-import { Wallet } from '../entities/wallet.entity';
-import { Transaction } from '../../transactions/entities/transaction.entity';
+import { ExecutionContext } from '@nestjs/common';
+import { PaymentsController } from './payments.controller';
+import { PaymentsService } from './payments.service';
+import { ConfigService } from '@nestjs/config';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
 
-describe('WalletLimitService', () => {
-  let service: WalletLimitService;
-  let txQueryBuilderMock: any;
+// Override guards so the controller is testable without a real PrismaService.
+const allowAllGuard = { canActivate: (_ctx: ExecutionContext) => true };
+
+describe('PaymentsController', () => {
+  let controller: PaymentsController;
+  let service: jest.Mocked<Pick<PaymentsService, 'initiatePayment'>>;
 
   beforeEach(async () => {
-    txQueryBuilderMock = {
-      select: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(),
-      getRawOne: jest.fn(),
-    };
-
-    const txRepoMock = {
-      createQueryBuilder: jest.fn().mockReturnValue(txQueryBuilderMock),
+    service = {
+      initiatePayment: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
+      controllers: [PaymentsController],
       providers: [
-        WalletLimitService,
-        {
-          provide: getRepositoryToken(Transaction),
-          useValue: txRepoMock,
-        },
+        { provide: PaymentsService, useValue: service },
+        { provide: ConfigService, useValue: { get: jest.fn() } },
       ],
-    }).compile();
+    })
+      .overrideGuard(ApiKeyGuard)
+      .useValue(allowAllGuard)
+      .overrideGuard(ApiKeyScopeGuard)
+      .useValue(allowAllGuard)
+      .compile();
 
-    service = module.get<WalletLimitService>(WalletLimitService);
+    controller = module.get<PaymentsController>(PaymentsController);
   });
 
-  it('should pass validation when outgoing transfer is within daily limit', async () => {
-    const mockWallet = {
-      id: 'wallet-1',
-      dailyLimit: '1000.0000000',
-      monthlyLimit: '5000.0000000',
-    } as Wallet;
-
-    txQueryBuilderMock.getRawOne.mockResolvedValue({ totalSpent: '400.0000000' });
-
-    await expect(
-      service.validateTransactionLimits(mockWallet, '500.0000000'),
-    ).resolves.not.toThrow();
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
   });
 
-  it('should throw UnprocessableEntityException when transfer exceeds rolling 24-hour limit', async () => {
-    const mockWallet = {
-      id: 'wallet-1',
-      dailyLimit: '1000.0000000',
-      monthlyLimit: null,
-    } as Wallet;
   it('create() should call paymentsService.initiatePayment and return the result', async () => {
     const dto = {
       recipientAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
-      // amount is a decimal string — validated upstream by @IsDecimalAmount
       amount: '100.5000000',
       assetCode: 'XLM',
     };
@@ -67,15 +50,14 @@ describe('WalletLimitService', () => {
       recipientAddress: dto.recipientAddress,
       amount: dto.amount,
       assetCode: dto.assetCode,
+      feeAmount: '0.0000200',
+      feeAssetCode: 'XLM',
       createdAt: '2026-07-24T00:00:00.000Z',
     };
     service.initiatePayment.mockResolvedValue(expected as any);
 
-    txQueryBuilderMock.getRawOne.mockResolvedValue({ totalSpent: '800.0000000' });
+    const res = await controller.create(dto);
 
-    await expect(
-      service.validateTransactionLimits(mockWallet, '300.0000000'),
-    ).rejects.toThrow(UnprocessableEntityException);
     expect(service.initiatePayment).toHaveBeenCalledWith(dto);
     expect(res).toEqual(expected);
   });

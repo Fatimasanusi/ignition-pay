@@ -9,12 +9,21 @@ import {
   IsDateString,
 } from 'class-validator';
 
+/**
+ * Query DTO for GET /transactions (Issue #246).
+ *
+ * Uses cursor-based pagination instead of offset pagination.
+ * `cursor` is the `id` of the last item from the previous page.
+ * When omitted, the first page is returned.
+ */
 export class GetTransactionsQueryDto {
+  /**
+   * Opaque cursor: the `id` of the last transaction returned on the
+   * previous page. Omit (or pass empty) to fetch the first page.
+   */
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(1)
-  page: number = 1;
+  @IsString()
+  cursor?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -57,7 +66,8 @@ export class TransactionDto {
 
 export class GetTransactionsResponseDto {
   data: TransactionDto[];
-  total: number;
-  page: number;
+  /** Cursor to pass as `cursor` on the next request. Null when no more pages. */
+  nextCursor: string | null;
+  hasNextPage: boolean;
   limit: number;
 }

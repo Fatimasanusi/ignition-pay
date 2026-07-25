@@ -1,45 +1,100 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { Wallet } from '../wallets/entities/wallet.entity';
-import { WalletLimitService } from '../wallets/services/wallet-limit.service';
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+
+export interface EstimatedFee {
+  feeAmount: string;
+  feeAssetCode: string;
+}
+
+/**
+ * Response shape for the Horizon `/fee_stats` endpoint.
+ * We only map the fields we actually consume.
+ */
+interface HorizonFeeStats {
+  last_ledger_base_fee: string; // base fee in stroops (1 XLM = 10_000_000 stroops)
+  fee_charged: {
+    p50: string; // median fee charged in last 5 ledgers (stroops)
+    p90: string;
+    p95: string;
+    p99: string;
+  };
+}
 
 @Injectable()
 export class PaymentsService {
-  constructor(
-    @InjectRepository(Wallet)
-    private readonly walletRepository: Repository<Wallet>,
-    private readonly walletLimitService: WalletLimitService,
-    private readonly dataSource: DataSource,
-  ) {}
+  private readonly logger = new Logger(PaymentsService.name);
+  private readonly horizonUrl: string;
 
-  async processPayment(senderWalletId: string, dto: CreatePaymentDto) {
-    const senderWallet = await this.walletRepository.findOne({
-      where: { id: senderWalletId },
-    });
-
-    if (!senderWallet) {
-      throw new BadRequestException('Sender wallet not found');
-    }
-
-    // Enforce rolling daily and monthly transfer limits prior to transaction creation
-    await this.walletLimitService.validateTransactionLimits(
-      senderWallet,
-      dto.amount,
+  constructor(private readonly config: ConfigService) {
+    this.horizonUrl = this.config.get<string>(
+      'HORIZON_URL',
+      'https://horizon.stellar.org',
     );
+  }
 
-    // Proceed with payment execution...
+  /**
+   * Fetch the current recommended network fee from Horizon (Issue #245).
+   *
+   * Uses the p50 (median) fee from the last 5 ledgers, converted from
+   * stroops to XLM (1 XLM = 10_000_000 stroops), and returned as a
+   * 7-decimal fixed-point string to match the Stellar decimal precision
+   * convention used throughout this codebase.
+   *
+   * Falls back to the Stellar minimum base fee (100 stroops = 0.00001 XLM)
+   * if Horizon is unreachable.
+   */
+  async estimateFee(): Promise<EstimatedFee> {
+    try {
+      const res = await fetch(`${this.horizonUrl}/fee_stats`);
+      if (!res.ok) {
+        throw new Error(`Horizon /fee_stats responded ${res.status}`);
+      }
+      const stats: HorizonFeeStats = await res.json();
+
+      // p50 is the median fee in stroops across recent ledgers — a good
+      // balance between reliability and cost.
+      const stroops = parseInt(stats.fee_charged?.p50 ?? stats.last_ledger_base_fee, 10);
+      if (!Number.isFinite(stroops) || stroops < 0) {
+        throw new Error(`Unexpected stroops value: ${stroops}`);
+      }
+
+      // Convert stroops → XLM with 7 decimal precision
+      const xlm = (stroops / 10_000_000).toFixed(7);
+
+      return { feeAmount: xlm, feeAssetCode: 'XLM' };
+    } catch (err) {
+      this.logger.warn(
+        `Fee estimation from Horizon failed, using fallback: ${(err as Error).message}`,
+      );
+      // 100 stroops = 0.00001 XLM — Stellar's minimum base fee
+      return { feeAmount: '0.0000100', feeAssetCode: 'XLM' };
+    }
+  }
+
+  /**
+   * Initiate a payment. Fetches the current network fee from Horizon
+   * and includes it in the response so callers can show it before
+   * the user confirms (Issue #245).
+   */
   async initiatePayment(dto: CreatePaymentDto) {
     // amount validity (range, precision) is enforced by @IsDecimalAmount on
     // CreatePaymentDto — no redundant guard needed here.
+    const { feeAmount, feeAssetCode } = await this.estimateFee();
+
     return {
       id: crypto.randomUUID(),
       status: 'queued',
       recipientAddress: dto.recipientAddress,
       amount: dto.amount,
       assetCode: dto.assetCode,
+      feeAmount,
+      feeAssetCode,
       createdAt: new Date().toISOString(),
     };
   }
