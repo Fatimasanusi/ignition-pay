@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Search } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -64,21 +64,70 @@ const mockTransactions = [
   },
 ]
 
+const PAGE_SIZE = 4
+
 export function HistoryPage() {
   const [filterType, setFilterType] = useState<'all' | 'sent' | 'received'>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [visibleTransactions, setVisibleTransactions] = useState<typeof mockTransactions>([])
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
 
-  const filteredTransactions = mockTransactions.filter((tx) => {
-    if (filterType !== 'all' && tx.type !== filterType) return false
-    if (
-      searchTerm &&
-      !tx.asset.toLowerCase().includes(searchTerm.toLowerCase()) &&
-      !tx.recipient.toLowerCase().includes(searchTerm.toLowerCase())
-    ) {
-      return false
-    }
-    return true
-  })
+  const filteredTransactions = useMemo(() => {
+    return mockTransactions.filter((tx) => {
+      if (filterType !== 'all' && tx.type !== filterType) return false
+      if (
+        searchTerm &&
+        !tx.asset.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !tx.recipient.toLowerCase().includes(searchTerm.toLowerCase())
+      ) {
+        return false
+      }
+      return true
+    })
+  }, [filterType, searchTerm])
+
+  useEffect(() => {
+    const firstPage = filteredTransactions.slice(0, PAGE_SIZE)
+    setVisibleTransactions(firstPage)
+    setCursor(firstPage.at(-1)?.id ?? null)
+    setHasMore(filteredTransactions.length > firstPage.length)
+    setIsLoadingMore(false)
+  }, [filteredTransactions])
+
+  useEffect(() => {
+    if (!sentinelRef.current || !hasMore) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries
+
+        if (entry?.isIntersecting && !isLoadingMore) {
+          const currentIndex = filteredTransactions.findIndex((tx) => tx.id === cursor)
+          const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0
+          const nextPage = filteredTransactions.slice(startIndex, startIndex + PAGE_SIZE)
+
+          if (nextPage.length === 0) {
+            setHasMore(false)
+            return
+          }
+
+          setIsLoadingMore(true)
+          setVisibleTransactions((prev) => [...prev, ...nextPage])
+          setCursor(nextPage.at(-1)?.id ?? null)
+          setHasMore(startIndex + nextPage.length < filteredTransactions.length)
+          setIsLoadingMore(false)
+        }
+      },
+      { rootMargin: '200px 0px' },
+    )
+
+    observer.observe(sentinelRef.current)
+
+    return () => observer.disconnect()
+  }, [cursor, filteredTransactions, hasMore, isLoadingMore])
 
   const stats = {
     total: mockTransactions.length,
@@ -193,11 +242,21 @@ export function HistoryPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredTransactions.map((tx) => (
+            {visibleTransactions.map((tx) => (
               <div key={tx.id}>
                 <TransactionRow {...tx} />
               </div>
             ))}
+            {hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-4 text-sm text-muted-foreground">
+                {isLoadingMore ? 'Loading more transactions…' : 'Scroll to load more'}
+              </div>
+            )}
+            {!hasMore && visibleTransactions.length > 0 && (
+              <div className="flex justify-center py-4 text-sm text-muted-foreground">
+                You&apos;ve reached the end of the history.
+              </div>
+            )}
           </div>
         )}
       </div>
