@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty } from 'class-validator';
+import { IsString, IsNotEmpty, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsDecimalAmount,
@@ -6,6 +6,11 @@ import {
 } from '../../common/decorators/is-decimal-amount.decorator';
 
 export class CreatePaymentDto {
+  @ApiProperty({ description: 'ID of the sender wallet (must belong to the authenticated user)' })
+  @IsUUID()
+  @IsNotEmpty()
+  senderWalletId: string;
+
   @ApiProperty({ description: 'Recipient Stellar address' })
   @IsString()
   @IsNotEmpty()

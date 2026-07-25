@@ -6,10 +6,12 @@ import {
   QUEUE_EMAIL,
   QUEUE_CONTRACT_EVENTS,
   QUEUE_ANALYTICS,
+  QUEUE_PAYMENTS,
 } from './queue.constants';
 import { AnalyticsProcessor } from './processors/analytics.processor';
 import { ContractEventsProcessor } from './processors/contract-events.processor';
 import { EmailProcessor } from './processors/email.processor';
+import { PaymentProcessor } from './processors/payment.processor';
 
 const DEAD_LETTER_SETTINGS = {
   attempts: 3,
@@ -31,10 +33,11 @@ const DEAD_LETTER_SETTINGS = {
       { name: QUEUE_EMAIL, defaultJobOptions: DEAD_LETTER_SETTINGS },
       { name: QUEUE_CONTRACT_EVENTS, defaultJobOptions: DEAD_LETTER_SETTINGS },
       { name: QUEUE_ANALYTICS, defaultJobOptions: DEAD_LETTER_SETTINGS },
+      { name: QUEUE_PAYMENTS, defaultJobOptions: DEAD_LETTER_SETTINGS },
     ),
     PrismaModule,
   ],
-  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor],
+  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor, PaymentProcessor],
   exports: [BullModule],
 })
 export class QueueModule {}

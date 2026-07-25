@@ -30,3 +30,14 @@ export interface AnalyticsEventPayload {
   userId?: string;
   properties?: Record<string, unknown>;
 }
+
+export const PAYMENT_JOB_PROCESS = 'process-payment';
+
+export interface PaymentJobPayload {
+  /** Persisted Transaction.id — the processor resolves this to a Stellar tx */
+  transactionId: string;
+  senderWalletId: string;
+  recipientAddress: string;
+  amount: string;
+  assetCode: string;
+}
