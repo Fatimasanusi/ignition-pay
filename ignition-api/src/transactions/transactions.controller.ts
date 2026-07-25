@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -9,7 +9,10 @@ import { ApiKeyGuard } from '../api-keys/api-key.guard';
 import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
 import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 import { TransactionsService } from './transactions.service';
-import { GetTransactionsQueryDto } from './dto/get-transactions.dto';
+import {
+  GetTransactionsQueryDto,
+  SubmitTransactionDto,
+} from './dto/get-transactions.dto';
 
 @ApiTags('transactions')
 @ApiBearerAuth()
@@ -29,5 +32,21 @@ export class TransactionsController {
   @ApiResponse({ status: 200, description: 'Paginated transaction list' })
   getTransactions(@Query() query: GetTransactionsQueryDto) {
     return this.transactionsService.getTransactions(query);
+  }
+
+  /**
+   * POST /transactions
+   * Submit a new transaction with idempotency support via stellarTxHash.
+   * If the same stellarTxHash is submitted again (e.g. after a network blip)
+   * the existing record is returned instead of creating a duplicate.
+   */
+  @Post()
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
+  @ApiOperation({ summary: 'Submit a transaction (idempotent via stellarTxHash)' })
+  @ApiResponse({ status: 201, description: 'Transaction created or existing record returned' })
+  @ApiResponse({ status: 400, description: 'Invalid input' })
+  submitTransaction(@Body() dto: SubmitTransactionDto) {
+    return this.transactionsService.submitTransaction(dto);
   }
 }

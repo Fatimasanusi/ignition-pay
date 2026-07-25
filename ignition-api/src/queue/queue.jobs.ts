@@ -30,3 +30,18 @@ export interface AnalyticsEventPayload {
   userId?: string;
   properties?: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// Horizon polling worker — Issue #243
+// ---------------------------------------------------------------------------
+
+/** Job name: poll a single transaction hash against Horizon */
+export const HORIZON_JOB_CHECK_TX = 'check-tx';
+
+/** Payload for a Horizon check-tx job */
+export interface HorizonCheckTxPayload {
+  /** Internal Transaction.id (UUID) */
+  transactionId: string;
+  /** Stellar transaction hash already recorded, or the account to watch */
+  stellarTxHash?: string;
+}
