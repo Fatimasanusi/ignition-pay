@@ -1,0 +1,286 @@
+/**
+ * Unit tests for the Stellar SSE Consumer (Issue #265).
+ *
+ * The tests verify the domain-logic layer (de-duplication, cursor persistence,
+ * notification dispatch, campaign/milestone status updates) without a live
+ * Horizon connection.  The `consumeStream` / `streamPayments` methods that
+ * deal with the fetch API are not exercised here — integration / e2e coverage
+ * is expected for those.
+ */
+import { Test, TestingModule } from '@nestjs/testing';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { ConfigService } from '@nestjs/config';
+import { NotificationType } from '@prisma/client';
+
+import { StellarSseConsumerService } from './stellar-sse-consumer.service';
+import { NotificationsService } from './notifications.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+const mockCache = {
+  get: jest.fn(),
+  set: jest.fn(),
+  delete: jest.fn(),
+};
+
+const mockPrisma = {
+  wallet: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+  },
+  campaign: {
+    findMany: jest.fn(),
+    update: jest.fn(),
+  },
+  milestone: {
+    update: jest.fn(),
+  },
+  notification: {
+    create: jest.fn(),
+    findMany: jest.fn(),
+    updateMany: jest.fn(),
+  },
+};
+
+const mockNotifications = {
+  create: jest.fn(),
+};
+
+const mockConfig = {
+  get: jest.fn().mockImplementation((key: string, def: unknown) => {
+    if (key === 'HORIZON_URL') return 'https://horizon-testnet.stellar.org';
+    return def;
+  }),
+};
+
+describe('StellarSseConsumerService', () => {
+  let service: StellarSseConsumerService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    // Prevent onModuleInit from trying to connect to a real DB
+    mockPrisma.wallet.findMany.mockResolvedValue([]);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        StellarSseConsumerService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
+        { provide: ConfigService, useValue: mockConfig },
+        { provide: CACHE_MANAGER, useValue: mockCache },
+      ],
+    }).compile();
+
+    service = module.get<StellarSseConsumerService>(StellarSseConsumerService);
+
+    // initialise without hitting the DB again
+    await module.init();
+  });
+
+  it('is defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  it('watchAddress() skips already-watched addresses', async () => {
+    // Register the address once so it appears in controllers map
+    const address = 'GADDRESS1';
+    // Manually insert into the controllers map to simulate a live watcher
+    (service as any).controllers.set(address, new AbortController());
+
+    const streamSpy = jest.spyOn(service as any, 'streamPayments');
+    await service.watchAddress(address);
+    expect(streamSpy).not.toHaveBeenCalled();
+  });
+
+  it('stopWatching() aborts the controller and removes the entry', () => {
+    const address = 'GADDRESS2';
+    const ctrl = new AbortController();
+    (service as any).controllers.set(address, ctrl);
+
+    service.stopWatching(address);
+
+    expect(ctrl.signal.aborted).toBe(true);
+    expect((service as any).controllers.has(address)).toBe(false);
+  });
+
+  describe('dispatchDomainEvents()', () => {
+    const address = 'GDEPOSITADDRESS';
+    const record = {
+      id: 'op1',
+      type: 'payment',
+      paging_token: '100',
+      transaction_hash: 'txhash1',
+      to: address,
+      from: 'GSENDER',
+      amount: '50',
+      asset_code: 'XLM',
+    };
+
+    beforeEach(() => {
+      mockPrisma.wallet.findUnique.mockResolvedValue({
+        id: 'w1',
+        userId: 'u1',
+      });
+    });
+
+    it('creates DONATION_RECEIVED notification for every active campaign', async () => {
+      mockPrisma.campaign.findMany.mockResolvedValue([
+        {
+          id: 'c1',
+          title: 'Test Campaign',
+          goalAmount: 1000,
+          milestones: [],
+          donations: [],
+        },
+      ]);
+
+      await (service as any).dispatchDomainEvents(address, record);
+
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.DONATION_RECEIVED,
+          relatedId: 'c1',
+        }),
+      );
+    });
+
+    it('creates MILESTONE_REACHED notification when totalRaised >= targetAmount', async () => {
+      mockPrisma.campaign.findMany.mockResolvedValue([
+        {
+          id: 'c1',
+          title: 'Test Campaign',
+          goalAmount: 1000,
+          milestones: [
+            { id: 'm1', title: 'First milestone', targetAmount: 50, status: 'ACTIVE' },
+          ],
+          donations: [], // 0 existing; amount from record = 50 => reaches target
+        },
+      ]);
+      mockPrisma.milestone.update.mockResolvedValue({});
+
+      await (service as any).dispatchDomainEvents(address, record);
+
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.MILESTONE_REACHED,
+          relatedId: 'm1',
+        }),
+      );
+      expect(mockPrisma.milestone.update).toHaveBeenCalledWith({
+        where: { id: 'm1' },
+        data: { status: 'COMPLETED', completedAt: expect.any(Date) },
+      });
+    });
+
+    it('does NOT create MILESTONE_REACHED when totalRaised < targetAmount', async () => {
+      mockPrisma.campaign.findMany.mockResolvedValue([
+        {
+          id: 'c1',
+          title: 'Test Campaign',
+          goalAmount: 1000,
+          milestones: [
+            { id: 'm1', title: 'Big milestone', targetAmount: 500, status: 'ACTIVE' },
+          ],
+          donations: [], // 0 existing; amount = 50 → not reached
+        },
+      ]);
+
+      await (service as any).dispatchDomainEvents(address, record);
+
+      const milestoneCall = mockNotifications.create.mock.calls.find(
+        ([p]: [{ type: NotificationType }]) =>
+          p.type === NotificationType.MILESTONE_REACHED,
+      );
+      expect(milestoneCall).toBeUndefined();
+    });
+
+    it('creates CAMPAIGN_COMPLETED when goalAmount is met', async () => {
+      mockPrisma.campaign.findMany.mockResolvedValue([
+        {
+          id: 'c1',
+          title: 'Goal Campaign',
+          goalAmount: 50, // exactly met by this payment
+          milestones: [],
+          donations: [],
+        },
+      ]);
+      mockPrisma.campaign.update.mockResolvedValue({});
+
+      await (service as any).dispatchDomainEvents(address, record);
+
+      expect(mockNotifications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: NotificationType.CAMPAIGN_COMPLETED,
+          relatedId: 'c1',
+        }),
+      );
+      expect(mockPrisma.campaign.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { status: 'COMPLETED' },
+      });
+    });
+
+    it('skips dispatch when wallet is not found', async () => {
+      mockPrisma.wallet.findUnique.mockResolvedValue(null);
+
+      await (service as any).dispatchDomainEvents(address, record);
+
+      expect(mockNotifications.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handlePayment()', () => {
+    const address = 'GDEPOSITADDRESS';
+    const record = {
+      id: 'op1',
+      type: 'payment',
+      paging_token: '200',
+      transaction_hash: 'txhash_dedup',
+      to: address,
+      from: 'GSENDER',
+      amount: '10',
+      asset_code: 'XLM',
+    };
+
+    it('skips processing if txHash was already seen (de-duplication)', async () => {
+      mockCache.get.mockResolvedValue('1'); // seen = true
+      const dispatchSpy = jest.spyOn(service as any, 'dispatchDomainEvents');
+
+      await (service as any).handlePayment(address, record);
+
+      expect(dispatchSpy).not.toHaveBeenCalled();
+    });
+
+    it('skips non-payment operation types', async () => {
+      const nonPayment = { ...record, type: 'manage_sell_offer' };
+      const dispatchSpy = jest.spyOn(service as any, 'dispatchDomainEvents');
+      mockCache.get.mockResolvedValue(null);
+
+      await (service as any).handlePayment(address, nonPayment);
+
+      expect(dispatchSpy).not.toHaveBeenCalled();
+    });
+
+    it('skips payments whose `to` field does not match the watched address', async () => {
+      const wrongTarget = { ...record, to: 'GOTHER' };
+      const dispatchSpy = jest.spyOn(service as any, 'dispatchDomainEvents');
+      mockCache.get.mockResolvedValue(null);
+
+      await (service as any).handlePayment(address, wrongTarget);
+
+      expect(dispatchSpy).not.toHaveBeenCalled();
+    });
+
+    it('persists cursor after successful dispatch', async () => {
+      mockCache.get.mockResolvedValue(null);
+      jest.spyOn(service as any, 'dispatchDomainEvents').mockResolvedValue(undefined);
+
+      await (service as any).handlePayment(address, record);
+
+      expect(mockCache.set).toHaveBeenCalledWith(
+        `horizon:cursor:${address}`,
+        record.paging_token,
+      );
+    });
+  });
+});
