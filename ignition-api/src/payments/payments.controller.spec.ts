@@ -1,28 +1,59 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentsController } from './payments.controller';
-import { PaymentsService } from './payments.service';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { UnprocessableEntityException } from '@nestjs/common';
+import { WalletLimitService } from './wallet-limit.service';
+import { Wallet } from '../entities/wallet.entity';
+import { Transaction } from '../../transactions/entities/transaction.entity';
 
-describe('PaymentsController', () => {
-  let controller: PaymentsController;
-  let service: jest.Mocked<Pick<PaymentsService, 'initiatePayment'>>;
+describe('WalletLimitService', () => {
+  let service: WalletLimitService;
+  let txQueryBuilderMock: any;
 
   beforeEach(async () => {
-    service = {
-      initiatePayment: jest.fn(),
+    txQueryBuilderMock = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn(),
+    };
+
+    const txRepoMock = {
+      createQueryBuilder: jest.fn().mockReturnValue(txQueryBuilderMock),
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [PaymentsController],
-      providers: [{ provide: PaymentsService, useValue: service }],
+      providers: [
+        WalletLimitService,
+        {
+          provide: getRepositoryToken(Transaction),
+          useValue: txRepoMock,
+        },
+      ],
     }).compile();
 
-    controller = module.get<PaymentsController>(PaymentsController);
+    service = module.get<WalletLimitService>(WalletLimitService);
   });
 
-  it('should be defined', () => {
-    expect(controller).toBeDefined();
+  it('should pass validation when outgoing transfer is within daily limit', async () => {
+    const mockWallet = {
+      id: 'wallet-1',
+      dailyLimit: '1000.0000000',
+      monthlyLimit: '5000.0000000',
+    } as Wallet;
+
+    txQueryBuilderMock.getRawOne.mockResolvedValue({ totalSpent: '400.0000000' });
+
+    await expect(
+      service.validateTransactionLimits(mockWallet, '500.0000000'),
+    ).resolves.not.toThrow();
   });
 
+  it('should throw UnprocessableEntityException when transfer exceeds rolling 24-hour limit', async () => {
+    const mockWallet = {
+      id: 'wallet-1',
+      dailyLimit: '1000.0000000',
+      monthlyLimit: null,
+    } as Wallet;
   it('create() should call paymentsService.initiatePayment and return the result', async () => {
     const dto = {
       recipientAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
@@ -40,8 +71,11 @@ describe('PaymentsController', () => {
     };
     service.initiatePayment.mockResolvedValue(expected as any);
 
-    const res = await controller.create(dto);
+    txQueryBuilderMock.getRawOne.mockResolvedValue({ totalSpent: '800.0000000' });
 
+    await expect(
+      service.validateTransactionLimits(mockWallet, '300.0000000'),
+    ).rejects.toThrow(UnprocessableEntityException);
     expect(service.initiatePayment).toHaveBeenCalledWith(dto);
     expect(res).toEqual(expected);
   });
