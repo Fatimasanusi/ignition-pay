@@ -377,4 +377,67 @@ describe('AddressesService', () => {
       ).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('generateMemo', () => {
+    it('generates a valid deposit memo for a wallet', async () => {
+      const result = await service.generateMemo('user-uuid', {
+        walletId: 'wallet-uuid',
+        memoType: 'id' as any,
+      });
+      expect(result).toHaveProperty('walletId', 'wallet-uuid');
+      expect(result).toHaveProperty('memoType', 'id');
+      expect(result).toHaveProperty('memoValue');
+    });
+
+    it('throws NotFoundException if wallet does not exist or belongs to another user', async () => {
+      const p = buildMockPrisma({ wallet: null });
+      // @ts-ignore
+      service = new AddressesService(p);
+      await expect(
+        service.generateMemo('user-uuid', { walletId: 'bad-id' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('validateMemo', () => {
+    it('validates memo format and routability', async () => {
+      const result = await service.validateMemo({
+        memoType: 'text',
+        memoValue: 'valid-note',
+      });
+      expect(result.valid).toBe(true);
+      expect(result.memoType).toBe('text');
+      expect(result.memoValue).toBe('valid-note');
+    });
+
+    it('returns invalid status for malformed memo', async () => {
+      const result = await service.validateMemo({
+        memoType: 'id',
+        memoValue: 'non-numeric',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('resolveDeposit', () => {
+    it('resolves deposit destination to matching wallet', async () => {
+      const gAddr = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7';
+      const p = buildMockPrisma({
+        wallet: { ...mockWallet, depositAddress: gAddr },
+      });
+      // @ts-ignore
+      service = new AddressesService(p);
+
+      const result = await service.resolveDeposit({
+        destination: gAddr,
+        memoType: 'id',
+        memoValue: '123',
+      });
+
+      expect(result.routed).toBe(true);
+      expect(result.walletId).toBe('wallet-uuid');
+      expect(result.userId).toBe('user-uuid');
+    });
+  });
 });

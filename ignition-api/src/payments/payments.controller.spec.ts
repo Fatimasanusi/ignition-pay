@@ -54,11 +54,29 @@ describe('WalletLimitService', () => {
       dailyLimit: '1000.0000000',
       monthlyLimit: null,
     } as Wallet;
+  it('create() should call paymentsService.initiatePayment and return the result', async () => {
+    const dto = {
+      recipientAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      // amount is a decimal string — validated upstream by @IsDecimalAmount
+      amount: '100.5000000',
+      assetCode: 'XLM',
+    };
+    const expected = {
+      id: 'payment-123',
+      status: 'queued',
+      recipientAddress: dto.recipientAddress,
+      amount: dto.amount,
+      assetCode: dto.assetCode,
+      createdAt: '2026-07-24T00:00:00.000Z',
+    };
+    service.initiatePayment.mockResolvedValue(expected as any);
 
     txQueryBuilderMock.getRawOne.mockResolvedValue({ totalSpent: '800.0000000' });
 
     await expect(
       service.validateTransactionLimits(mockWallet, '300.0000000'),
     ).rejects.toThrow(UnprocessableEntityException);
+    expect(service.initiatePayment).toHaveBeenCalledWith(dto);
+    expect(res).toEqual(expected);
   });
 });

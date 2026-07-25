@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { WalletLimitService } from '../wallets/services/wallet-limit.service';
+import { Injectable } from '@nestjs/common';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 
 @Injectable()
@@ -30,5 +31,16 @@ export class PaymentsService {
     );
 
     // Proceed with payment execution...
+  async initiatePayment(dto: CreatePaymentDto) {
+    // amount validity (range, precision) is enforced by @IsDecimalAmount on
+    // CreatePaymentDto — no redundant guard needed here.
+    return {
+      id: crypto.randomUUID(),
+      status: 'queued',
+      recipientAddress: dto.recipientAddress,
+      amount: dto.amount,
+      assetCode: dto.assetCode,
+      createdAt: new Date().toISOString(),
+    };
   }
 }
