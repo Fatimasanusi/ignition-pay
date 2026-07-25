@@ -166,22 +166,31 @@ func extractRoutingStable(input RoutingInput) RoutingResult {
 			routingID = NewRoutingID(norm.Normalized)
 			routingSource = "memo"
 			warnings = append(warnings, norm.Warnings...)
+		} else if ValidateMemoText(memoValue) {
+			routingID = NewRoutingID(memoValue)
+			routingSource = "memo"
 		} else {
 			warnings = append(warnings, address.Warning{
 				Code:     address.WarnMemoTextUnroutable,
 				Severity: "warn",
-				Message:  "MEMO_TEXT was not a valid numeric uint64.",
+				Message:  "MEMO_TEXT was not valid for routing (must be <= 28 UTF-8 bytes).",
 			})
 		}
-	} else if unsupportedMemoType := normalizeUnsupportedMemoType(input.MemoType); unsupportedMemoType != "" {
-		warnings = append(warnings, address.Warning{
-			Code:     address.WarnUnsupportedMemoType,
-			Severity: "warn",
-			Message:  "Memo type " + unsupportedMemoType + " is not supported for routing.",
-			Context: &address.WarningContext{
-				MemoType: unsupportedMemoType,
-			},
-		})
+	} else if (input.MemoType == "hash" || input.MemoType == "return") && memoValue != "" {
+		if ValidateMemoHash(memoValue) {
+			routingID = NewRoutingID(strings.ToLower(memoValue))
+			routingSource = "memo"
+		} else {
+			unsupportedMemoType := normalizeUnsupportedMemoType(input.MemoType)
+			warnings = append(warnings, address.Warning{
+				Code:     address.WarnUnsupportedMemoType,
+				Severity: "warn",
+				Message:  "Memo type " + unsupportedMemoType + " is not supported for routing.",
+				Context: &address.WarningContext{
+					MemoType: unsupportedMemoType,
+				},
+			})
+		}
 	} else if input.MemoType != "none" {
 		warnings = append(warnings, address.Warning{
 			Code:     address.WarnUnsupportedMemoType,
