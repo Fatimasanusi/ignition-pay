@@ -10,6 +10,7 @@ import {
 import { AnalyticsProcessor } from './processors/analytics.processor';
 import { ContractEventsProcessor } from './processors/contract-events.processor';
 import { EmailProcessor } from './processors/email.processor';
+import { MilestoneProcessor } from './processors/milestone.processor';
 
 const DEAD_LETTER_SETTINGS = {
   attempts: 3,
@@ -34,7 +35,7 @@ const DEAD_LETTER_SETTINGS = {
     ),
     PrismaModule,
   ],
-  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor],
+  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor, MilestoneProcessor],
   exports: [BullModule],
 })
 export class QueueModule {}

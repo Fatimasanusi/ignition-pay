@@ -39,6 +39,22 @@ export class GetTransactionsQueryDto {
   @IsOptional()
   @IsString()
   type?: string;
+
+  /**
+   * Filter by asset code, e.g. "XLM", "USDC".
+   * Case-insensitive exact match against the donation's assetCode.
+   */
+  @IsOptional()
+  @IsString()
+  asset?: string;
+
+  /**
+   * Free-text search over counterparty wallet address (donorId) and tx hash.
+   * Partial, case-insensitive match.
+   */
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class TransactionDto {

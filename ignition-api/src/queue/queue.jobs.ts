@@ -30,3 +30,27 @@ export interface AnalyticsEventPayload {
   userId?: string;
   properties?: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------------------
+// Milestone notifications
+// ---------------------------------------------------------------------------
+
+export const MILESTONE_JOB_COMPLETED = 'milestone-completed';
+export const MILESTONE_JOB_CAMPAIGN_COMPLETED = 'campaign-completed';
+
+export interface MilestoneCompletedPayload {
+  /** The campaign creator's user id – recipient of the notification */
+  creatorId: string;
+  creatorEmail: string;
+  campaignId: string;
+  campaignTitle: string;
+  milestoneId: string;
+  milestoneTitle: string;
+}
+
+export interface CampaignCompletedPayload {
+  creatorId: string;
+  creatorEmail: string;
+  campaignId: string;
+  campaignTitle: string;
+}
