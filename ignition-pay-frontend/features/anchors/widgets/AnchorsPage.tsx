@@ -1,8 +1,20 @@
 'use client'
 
-import { ArrowUpRight, ArrowDownLeft, TrendingUp, Lock } from 'lucide-react'
+import { ArrowUpRight, ArrowDownLeft, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+
+const statusStyles = {
+  Online: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
+  Maintenance: 'border-amber-500/30 bg-amber-500/10 text-amber-600',
+  Offline: 'border-rose-500/30 bg-rose-500/10 text-rose-600',
+} as const
+
+const statusDotStyles = {
+  Online: 'bg-emerald-500',
+  Maintenance: 'bg-amber-500',
+  Offline: 'bg-rose-500',
+} as const
 
 const anchors = [
   {
@@ -15,6 +27,8 @@ const anchors = [
     maxDeposit: 10000,
     fee: '1.5%',
     verified: true,
+    sepSupport: ['SEP-6', 'SEP-24', 'SEP-31'],
+    status: 'Online',
   },
   {
     id: 2,
@@ -26,6 +40,8 @@ const anchors = [
     maxDeposit: 50000,
     fee: '2.0%',
     verified: true,
+    sepSupport: ['SEP-6', 'SEP-24', 'SEP-31', 'SEP-38'],
+    status: 'Maintenance',
   },
   {
     id: 3,
@@ -37,6 +53,8 @@ const anchors = [
     maxDeposit: 25000,
     fee: '1.8%',
     verified: true,
+    sepSupport: ['SEP-6', 'SEP-24', 'SEP-31'],
+    status: 'Online',
   },
   {
     id: 4,
@@ -48,6 +66,8 @@ const anchors = [
     maxDeposit: 5000,
     fee: '2.5%',
     verified: false,
+    sepSupport: ['SEP-6', 'SEP-24'],
+    status: 'Offline',
   },
 ]
 
@@ -75,7 +95,7 @@ export default function AnchorsPage() {
             <div className="text-sm text-foreground">
               <p className="font-semibold">Secure anchor connections</p>
               <p className="text-muted-foreground">
-                All anchor integrations follow SEP-6, SEP-24, and SEP-31 standards. Your keys remain under your control.
+                All anchor integrations follow SEP-6, SEP-24, SEP-31, and SEP-38 standards. Your keys remain under your control.
               </p>
             </div>
           </div>
@@ -107,11 +127,28 @@ export default function AnchorsPage() {
                       </p>
                     </div>
                   </div>
-                  {anchor.verified && (
-                    <div className="px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-semibold">
-                      Verified
+                  <div className="flex flex-wrap items-center gap-2">
+                    {anchor.verified && (
+                      <div className="px-3 py-1 rounded-full bg-green-500/20 text-green-500 text-xs font-semibold">
+                        Verified
+                      </div>
+                    )}
+                    <div className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[anchor.status as keyof typeof statusStyles]}`}>
+                      <span className={`h-2 w-2 rounded-full ${statusDotStyles[anchor.status as keyof typeof statusDotStyles]}`} />
+                      {anchor.status}
                     </div>
-                  )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {anchor.sepSupport.map((standard) => (
+                    <span
+                      key={standard}
+                      className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary"
+                    >
+                      {standard}
+                    </span>
+                  ))}
                 </div>
 
                 <div className="space-y-3 border-t border-border pt-6">
@@ -166,7 +203,7 @@ export default function AnchorsPage() {
                       {anchor.icon}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-semibold text-foreground">
                           {anchor.name}
                         </h3>
@@ -175,11 +212,26 @@ export default function AnchorsPage() {
                             Verified
                           </div>
                         )}
+                        <div className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusStyles[anchor.status as keyof typeof statusStyles]}`}>
+                          <span className={`h-2 w-2 rounded-full ${statusDotStyles[anchor.status as keyof typeof statusDotStyles]}`} />
+                          {anchor.status}
+                        </div>
                       </div>
                       <p className="text-sm text-muted-foreground mt-1">
                         {anchor.description}
                       </p>
-                      <div className="flex gap-4 mt-3 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {anchor.sepSupport.map((standard) => (
+                          <span
+                            key={standard}
+                            className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary"
+                          >
+                            {standard}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-4 mt-3 text-xs text-muted-foreground">
+                        <span>Status: {anchor.status}</span>
                         <span>Currencies: {anchor.supported.join(', ')}</span>
                         <span>Fee: {anchor.fee}</span>
                       </div>
