@@ -20,10 +20,9 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { Request } from 'express';
-import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../auth/permissions/permissions.guard';
-import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
-import { Permission } from '../auth/permissions/permissions.map';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
+import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 import { CampaignsService } from './campaigns.service';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
@@ -42,9 +41,9 @@ export class CampaignsController {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Post()
-  @RequirePermissions(Permission.CAMPAIGN_CREATE)
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create a new campaign' })
   @ApiResponse({ status: 201, description: 'Campaign successfully created' })
@@ -56,9 +55,9 @@ export class CampaignsController {
     return this.campaignsService.createCampaign(userId, body);
   }
 
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch(':id')
-  @RequirePermissions(Permission.CAMPAIGN_UPDATE_OWN)
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update an existing campaign' })
   @ApiResponse({ status: 200, description: 'Campaign successfully updated' })
@@ -87,6 +86,8 @@ export class CampaignsController {
    * Cached for 30 seconds
    */
   @Get()
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('read')
   @ApiOperation({
     summary: 'Browse public campaigns with filtering and sorting',
   })

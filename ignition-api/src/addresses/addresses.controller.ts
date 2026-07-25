@@ -16,7 +16,9 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
+import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 import { AddressesService } from './addresses.service';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
@@ -28,12 +30,13 @@ import { ResolveDepositDto } from './dto/resolve-deposit.dto';
 
 @ApiTags('addresses')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('addresses')
 export class AddressesController {
   constructor(private readonly addressesService: AddressesService) {}
 
   @Post()
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiOperation({ summary: 'Create a new deposit address' })
   @ApiResponse({
     status: 201,
@@ -46,6 +49,8 @@ export class AddressesController {
   }
 
   @Get()
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('read')
   @ApiOperation({ summary: 'List all deposit addresses' })
   @ApiResponse({
     status: 200,
@@ -57,6 +62,8 @@ export class AddressesController {
   }
 
   @Get(':id')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('read')
   @ApiOperation({ summary: 'Get a deposit address by ID' })
   @ApiResponse({
     status: 200,
@@ -69,6 +76,8 @@ export class AddressesController {
   }
 
   @Get('wallet/:walletId')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('read')
   @ApiOperation({ summary: 'Get addresses by wallet ID' })
   @ApiResponse({
     status: 200,
@@ -82,6 +91,8 @@ export class AddressesController {
   }
 
   @Put(':id')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiOperation({ summary: 'Update a deposit address' })
   @ApiResponse({
     status: 200,
@@ -97,6 +108,8 @@ export class AddressesController {
   }
 
   @Delete(':id')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiOperation({ summary: 'Delete a deposit address' })
   @ApiResponse({ status: 200, description: 'Address deleted' })
   @ApiResponse({ status: 404, description: 'Address not found' })
@@ -105,6 +118,8 @@ export class AddressesController {
   }
 
   @Post('generate')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiOperation({ summary: 'Generate a new deposit address for a wallet' })
   @ApiResponse({ status: 201, description: 'Address generated and allocated' })
   @ApiResponse({ status: 404, description: 'Wallet not found' })
@@ -113,6 +128,8 @@ export class AddressesController {
   }
 
   @Get('wallet/:walletId/user')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('read')
   @ApiOperation({
     summary: 'List all deposit addresses for a wallet belonging to user',
   })
