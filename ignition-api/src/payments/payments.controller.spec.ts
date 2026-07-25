@@ -23,20 +23,26 @@ describe('PaymentsController', () => {
     expect(controller).toBeDefined();
   });
 
-  it('create() should call paymentsService.initiatePayment', async () => {
+  it('create() should call paymentsService.initiatePayment and return the result', async () => {
     const dto = {
-      campaignId: 'camp-123',
-      amount: '100',
-      donorWalletAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      recipientAddress: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      // amount is a decimal string — validated upstream by @IsDecimalAmount
+      amount: '100.5000000',
+      assetCode: 'XLM',
     };
-    service.initiatePayment.mockResolvedValue({
+    const expected = {
       id: 'payment-123',
-      status: 'PENDING',
-    } as any);
+      status: 'queued',
+      recipientAddress: dto.recipientAddress,
+      amount: dto.amount,
+      assetCode: dto.assetCode,
+      createdAt: '2026-07-24T00:00:00.000Z',
+    };
+    service.initiatePayment.mockResolvedValue(expected as any);
 
     const res = await controller.create(dto);
 
     expect(service.initiatePayment).toHaveBeenCalledWith(dto);
-    expect(res).toEqual({ id: 'payment-123', status: 'PENDING' });
+    expect(res).toEqual(expected);
   });
 });
