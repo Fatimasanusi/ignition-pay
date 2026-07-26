@@ -9,12 +9,21 @@ import {
   IsDateString,
 } from 'class-validator';
 
+/**
+ * Query DTO for GET /transactions (Issue #246).
+ *
+ * Uses cursor-based pagination instead of offset pagination.
+ * `cursor` is the `id` of the last item from the previous page.
+ * When omitted, the first page is returned.
+ */
 export class GetTransactionsQueryDto {
+  /**
+   * Opaque cursor: the `id` of the last transaction returned on the
+   * previous page. Omit (or pass empty) to fetch the first page.
+   */
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(1)
-  page: number = 1;
+  @IsString()
+  cursor?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -33,31 +42,55 @@ export class GetTransactionsQueryDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['PENDING', 'CONFIRMED', 'REFUNDED', 'FAILED'])
+  @IsIn(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'])
   status?: string;
 
   @IsOptional()
   @IsString()
   type?: string;
+
+  /**
+   * Filter by asset code, e.g. "XLM", "USDC".
+   * Case-insensitive exact match against the donation's assetCode.
+   */
+  @IsOptional()
+  @IsString()
+  asset?: string;
+
+  /**
+   * Free-text search over counterparty wallet address (donorId) and tx hash.
+   * Partial, case-insensitive match.
+   */
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class TransactionDto {
   id: string;
+  fromWalletId: string;
+  toWalletId: string;
   amount: number;
   assetCode: string;
-  txHash: string | null;
+  stellarTxHash: string | null;
   status: string;
-  type: string;
-  donorId: string;
-  campaignId: string;
-  donatedAt: Date;
-  confirmedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export class GetTransactionsResponseDto {
   data: TransactionDto[];
-  total: number;
-  page: number;
+  /** Cursor to pass as `cursor` on the next request. Null when no more pages. */
+  nextCursor: string | null;
+  hasNextPage: boolean;
   limit: number;
+}
+
+export class SubmitTransactionDto {
+  fromWalletId: string;
+  toWalletId: string;
+  amount: string;
+  assetCode?: string;
+  /** Idempotency key — provide the Stellar tx hash to dedupe retries (#244) */
+  stellarTxHash?: string;
 }

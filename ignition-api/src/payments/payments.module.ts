@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ApiKeyGuard } from '../api-keys/api-key.guard';
 import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -7,7 +8,7 @@ import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, ConfigModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, ApiKeyGuard, ApiKeyScopeGuard, ApiKeyExpirationService],
 })

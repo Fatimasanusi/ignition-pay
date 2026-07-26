@@ -10,7 +10,7 @@ import {
   ReconciliationStatus,
 } from './entities/balance-discrepancy.entity';
 
-@Injectable Erb
+@Injectable()
 export class BalanceReconciliationService {
   private readonly logger = new Logger(BalanceReconciliationService.name);
   private readonly horizonServer: Horizon.Server;
