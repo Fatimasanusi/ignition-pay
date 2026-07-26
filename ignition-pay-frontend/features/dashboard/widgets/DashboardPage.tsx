@@ -1,12 +1,16 @@
 'use client'
 
+import { useCallback, useState } from 'react'
 import { useMemo } from 'react'
 import Link from 'next/link'
-import { Send, ArrowDownLeft, TrendingUp } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Send, ArrowDownLeft, TrendingUp, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { WalletCard } from '@/components/wallet-card'
 import { PortfolioSummaryCard } from '@/components/portfolio-summary-card'
 import { TransactionRow } from '@/components/transaction-row'
+import { PullToRefresh } from '@/components/pull-to-refresh'
+import { MASKED_AMOUNT, useHideBalances } from '@/hooks/use-hide-balances'
 import { InlineEmpty, InlineError, InlineSkeleton } from '@/components/inline-state'
 import { groupAssets, portfolioChange24h, totalValue } from '@/features/dashboard/models'
 import { DEMO_WALLET_ADDRESS } from '@/features/dashboard/services'
@@ -45,6 +49,16 @@ const mockTransactions = [
 ]
 
 export function DashboardPage() {
+  const router = useRouter()
+  const { isHidden, toggle } = useHideBalances()
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null)
+
+  // Balances and recent activity are server-rendered, so a refresh re-runs the
+  // route's data fetching. Awaited so the spinner reflects real work.
+  const refresh = useCallback(async () => {
+    router.refresh()
+    setRefreshedAt(new Date())
+  }, [router])
   const { snapshot, status, error, isRefreshing, isLive, refresh } =
     useWalletBalances(DEMO_WALLET_ADDRESS)
 
@@ -66,6 +80,20 @@ export function DashboardPage() {
                 Welcome back! Here&apos;s your wallet overview.
               </p>
             </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={toggle}
+                aria-pressed={isHidden}
+                aria-label={isHidden ? 'Show balances' : 'Hide balances'}
+              >
+                {isHidden ? (
+                  <EyeOff className="mr-2 h-4 w-4" />
+                ) : (
+                  <Eye className="mr-2 h-4 w-4" />
+                )}
+                {isHidden ? 'Show' : 'Hide'}
+              </Button>
             <div className="flex items-center gap-3">
               <ThemeToggle />
               <Link href="/receive">
@@ -86,7 +114,20 @@ export function DashboardPage() {
       </div>
 
       {/* Main Content */}
+      <PullToRefresh onRefresh={refresh}>
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        {/* Wallet Card */}
+        <WalletCard
+          address={mockWallet.address}
+          xlmBalance={mockWallet.xlmBalance}
+          usdcBalance={mockWallet.usdcBalance}
+          hideAmounts={isHidden}
+          onToggleHideAmounts={toggle}
+        />
+        {refreshedAt && (
+          <p className="text-xs text-muted-foreground -mt-4">
+            Last refreshed at {refreshedAt.toLocaleTimeString()}
+          </p>
         {/* Portfolio summary */}
         {status === 'loading' && !snapshot && (
           <div
@@ -133,6 +174,15 @@ export function DashboardPage() {
                 Your Stellar assets and balances
               </p>
             </div>
+            <div className="flex items-center gap-2 text-primary">
+              <TrendingUp size={16} />
+              <span className="text-sm font-medium">Portfolio up 3.2% today</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {mockAssets.map((asset) => (
+              <AssetCard key={asset.code} {...asset} hideAmounts={isHidden} />
+            ))}
             {snapshot && assets.length > 0 && (
               <div
                 className={`flex items-center gap-2 ${isPositive ? 'text-primary' : 'text-red-500'}`}
@@ -235,7 +285,9 @@ export function DashboardPage() {
           </div>
           <div className="bg-card rounded-xl border border-border p-6">
             <p className="text-muted-foreground text-sm">Network Fee Saved</p>
-            <p className="text-3xl font-bold text-green-500 mt-2">$127.85</p>
+            <p className="text-3xl font-bold text-green-500 mt-2">
+              {isHidden ? MASKED_AMOUNT : '$127.85'}
+            </p>
             <p className="text-xs text-muted-foreground mt-2">vs traditional payment</p>
           </div>
           <div className="bg-card rounded-xl border border-border p-6">
@@ -245,6 +297,7 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+      </PullToRefresh>
     </div>
   )
 }
