@@ -1,21 +1,53 @@
 'use client'
 
-import { useState } from 'react'
-import { Send, Zap, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Send, Zap, AlertCircle, CheckCircle2, CheckCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
+import { validateStellarAddress } from '@/lib/stellar/strkey'
+import {
+  MEMO_TEXT_MAX_BYTES,
+  MEMO_TYPES,
+  MEMO_TYPE_HINTS,
+  MEMO_TYPE_LABELS,
+  memoByteLength,
+  validateMemo,
+  type MemoType,
+} from '@/lib/stellar/memo'
+
+const ADDRESS_KIND_LABELS = {
+  publicKey: 'Stellar account',
+  muxedAccount: 'Muxed account',
+  contract: 'Contract address',
+} as const
 
 export function SendPage() {
   const [step, setStep] = useState<'form' | 'review' | 'confirmed'>('form')
+  const [recipientTouched, setRecipientTouched] = useState(false)
   const [formData, setFormData] = useState({
     recipient: '',
     amount: '',
     asset: 'XLM',
+    memoType: 'none' as MemoType,
     memo: '',
   })
 
+  const recipientCheck = useMemo(
+    () => validateStellarAddress(formData.recipient),
+    [formData.recipient],
+  )
+  const memoCheck = useMemo(
+    () => validateMemo(formData.memoType, formData.memo),
+    [formData.memoType, formData.memo],
+  )
+
+  const showRecipientError =
+    recipientTouched && formData.recipient.length > 0 && !recipientCheck.isValid
+  const canReview = recipientCheck.isValid && memoCheck.isValid && Boolean(formData.amount)
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canReview) return
     setStep('review')
   }
 
@@ -25,7 +57,8 @@ export function SendPage() {
 
   const handleReset = () => {
     setStep('form')
-    setFormData({ recipient: '', amount: '', asset: 'XLM', memo: '' })
+    setRecipientTouched(false)
+    setFormData({ recipient: '', amount: '', asset: 'XLM', memoType: 'none', memo: '' })
   }
 
   if (step === 'confirmed') {
@@ -156,15 +189,48 @@ export function SendPage() {
                 <input
                   type="text"
                   placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-                  className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+                  className={`w-full px-4 py-3 rounded-lg bg-background border text-foreground placeholder:text-muted-foreground focus:outline-none font-mono text-sm ${
+                    showRecipientError
+                      ? 'border-destructive focus:border-destructive'
+                      : recipientCheck.isValid
+                        ? 'border-green-500/60 focus:border-green-500'
+                        : 'border-border focus:border-primary'
+                  }`}
                   value={formData.recipient}
                   onChange={(e) =>
-                    setFormData({ ...formData, recipient: e.target.value })
+                    setFormData({ ...formData, recipient: e.target.value.trim() })
                   }
+                  onBlur={() => setRecipientTouched(true)}
+                  aria-invalid={showRecipientError}
+                  aria-describedby="recipient-feedback"
+                  autoCapitalize="characters"
+                  spellCheck={false}
                   required
                 />
-                <p className="text-xs text-muted-foreground mt-2">
-                  The Stellar address you want to send funds to
+                <p
+                  id="recipient-feedback"
+                  aria-live="polite"
+                  className={`text-xs mt-2 flex items-center gap-1.5 ${
+                    showRecipientError
+                      ? 'text-destructive'
+                      : recipientCheck.isValid
+                        ? 'text-green-500'
+                        : 'text-muted-foreground'
+                  }`}
+                >
+                  {showRecipientError ? (
+                    <>
+                      <AlertCircle size={13} />
+                      {recipientCheck.error}
+                    </>
+                  ) : recipientCheck.isValid && recipientCheck.kind ? (
+                    <>
+                      <CheckCircle size={13} />
+                      Valid {ADDRESS_KIND_LABELS[recipientCheck.kind]} — checksum verified
+                    </>
+                  ) : (
+                    'The Stellar address you want to send funds to'
+                  )}
                 </p>
               </div>
 
@@ -200,19 +266,79 @@ export function SendPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-foreground mb-2">Memo (Optional)</label>
-                <textarea
-                  placeholder="Add a note for this transaction..."
-                  className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none"
-                  rows={3}
-                  value={formData.memo}
+                <label
+                  htmlFor="memo-type"
+                  className="block text-sm font-semibold text-foreground mb-2"
+                >
+                  Memo (Optional)
+                </label>
+                <select
+                  id="memo-type"
+                  className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground focus:outline-none focus:border-primary"
+                  value={formData.memoType}
                   onChange={(e) =>
-                    setFormData({ ...formData, memo: e.target.value })
+                    // Switching type invalidates the previous value's format.
+                    setFormData({ ...formData, memoType: e.target.value as MemoType, memo: '' })
                   }
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  Add a note to help identify this transaction
+                >
+                  {MEMO_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {MEMO_TYPE_LABELS[type]}
+                    </option>
+                  ))}
+                </select>
+
+                {formData.memoType !== 'none' && (
+                  <div className="mt-3">
+                    <input
+                      type="text"
+                      aria-label={`Memo ${MEMO_TYPE_LABELS[formData.memoType]}`}
+                      placeholder={
+                        formData.memoType === 'text'
+                          ? 'Invoice 1042'
+                          : formData.memoType === 'id'
+                            ? '1234567890'
+                            : '64 hex characters'
+                      }
+                      className={`w-full px-4 py-3 rounded-lg bg-background border text-foreground placeholder:text-muted-foreground focus:outline-none ${
+                        formData.memo && !memoCheck.isValid
+                          ? 'border-destructive focus:border-destructive'
+                          : 'border-border focus:border-primary'
+                      } ${formData.memoType === 'hash' ? 'font-mono text-sm' : ''}`}
+                      value={formData.memo}
+                      onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+                      aria-invalid={Boolean(formData.memo) && !memoCheck.isValid}
+                      aria-describedby="memo-feedback"
+                      inputMode={formData.memoType === 'id' ? 'numeric' : 'text'}
+                    />
+                    {formData.memoType === 'text' && (
+                      <p className="text-xs text-muted-foreground mt-1 text-right">
+                        {memoByteLength(formData.memo)}/{MEMO_TEXT_MAX_BYTES} bytes
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <p
+                  id="memo-feedback"
+                  aria-live="polite"
+                  className={`text-xs mt-2 ${
+                    formData.memo && !memoCheck.isValid
+                      ? 'text-destructive'
+                      : 'text-muted-foreground'
+                  }`}
+                >
+                  {formData.memo && memoCheck.error
+                    ? memoCheck.error
+                    : MEMO_TYPE_HINTS[formData.memoType]}
                 </p>
+
+                {memoCheck.warning && (
+                  <div className="mt-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex gap-2">
+                    <AlertCircle size={16} className="text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-foreground">{memoCheck.warning}</p>
+                  </div>
+                )}
               </div>
 
               <div className="bg-primary/10 border border-primary/30 rounded-lg p-4 flex gap-3">
@@ -233,7 +359,7 @@ export function SendPage() {
               <Button
                 type="submit"
                 className="flex-1 bg-primary hover:bg-primary/90"
-                disabled={!formData.recipient || !formData.amount}
+                disabled={!canReview}
               >
                 <Send className="mr-2 h-4 w-4" />
                 Review Payment
@@ -266,10 +392,18 @@ export function SendPage() {
                   <span className="text-muted-foreground">Network Fee</span>
                   <span className="font-semibold text-foreground">0.00001 XLM</span>
                 </div>
-                {formData.memo && (
+                {formData.memoType !== 'none' && formData.memo && (
                   <div className="border-t border-border pt-4">
-                    <p className="text-muted-foreground text-sm mb-1">Memo</p>
-                    <p className="text-foreground">{formData.memo}</p>
+                    <p className="text-muted-foreground text-sm mb-1">
+                      Memo ({MEMO_TYPE_LABELS[formData.memoType]})
+                    </p>
+                    <p
+                      className={`text-foreground ${
+                        formData.memoType === 'hash' ? 'font-mono text-xs break-all' : ''
+                      }`}
+                    >
+                      {formData.memo}
+                    </p>
                   </div>
                 )}
               </div>

@@ -2,17 +2,27 @@
 
 import { Copy, Eye, EyeOff } from 'lucide-react'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { MASKED_AMOUNT } from '@/hooks/use-hide-balances'
 
 interface WalletCardProps {
   address: string
   xlmBalance: number
   usdcBalance: number
+  /** When true, amounts are masked for privacy. */
+  hideAmounts?: boolean
+  /** Flips the shared privacy preference; the eye button is hidden without it. */
+  onToggleHideAmounts?: () => void
 }
 
-export function WalletCard({ address, xlmBalance, usdcBalance }: WalletCardProps) {
-  const [showBalance, setShowBalance] = useState(true)
+export function WalletCard({
+  address,
+  xlmBalance,
+  usdcBalance,
+  hideAmounts = false,
+  onToggleHideAmounts,
+}: WalletCardProps) {
   const [copied, setCopied] = useState(false)
+  const showBalance = !hideAmounts
 
   const copyAddress = () => {
     navigator.clipboard.writeText(address)
@@ -44,12 +54,17 @@ export function WalletCard({ address, xlmBalance, usdcBalance }: WalletCardProps
             </div>
             {copied && <p className="text-xs text-primary mt-1">Copied!</p>}
           </div>
-          <button
-            onClick={() => setShowBalance(!showBalance)}
-            className="text-muted-foreground hover:text-primary transition-colors"
-          >
-            {showBalance ? <Eye size={20} /> : <EyeOff size={20} />}
-          </button>
+          {onToggleHideAmounts && (
+            <button
+              onClick={onToggleHideAmounts}
+              aria-pressed={hideAmounts}
+              aria-label={hideAmounts ? 'Show balances' : 'Hide balances'}
+              title={hideAmounts ? 'Show balances' : 'Hide balances'}
+              className="text-muted-foreground hover:text-primary transition-colors"
+            >
+              {showBalance ? <Eye size={20} /> : <EyeOff size={20} />}
+            </button>
+          )}
         </div>
 
         {/* Balances */}
@@ -57,14 +72,16 @@ export function WalletCard({ address, xlmBalance, usdcBalance }: WalletCardProps
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">XLM Balance</p>
             <p className="text-3xl font-bold text-foreground mt-1">
-              {showBalance ? xlmBalance.toFixed(2) : '••••••'}
+              {showBalance ? xlmBalance.toFixed(2) : MASKED_AMOUNT}
             </p>
-            <p className="text-xs text-muted-foreground mt-1">≈ ${(xlmBalance * 0.11).toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {showBalance ? `≈ $${(xlmBalance * 0.11).toFixed(2)}` : '≈ ••••••'}
+            </p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide">USDC Balance</p>
             <p className="text-3xl font-bold text-foreground mt-1">
-              {showBalance ? usdcBalance.toFixed(2) : '••••••'}
+              {showBalance ? usdcBalance.toFixed(2) : MASKED_AMOUNT}
             </p>
             <p className="text-xs text-muted-foreground mt-1">1:1 USD</p>
           </div>
@@ -74,7 +91,7 @@ export function WalletCard({ address, xlmBalance, usdcBalance }: WalletCardProps
         <div className="pt-4 border-t border-border">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Value</p>
           <p className="text-4xl font-bold text-primary mt-2">
-            {showBalance ? `$${(xlmBalance * 0.11 + usdcBalance).toFixed(2)}` : '••••••'}
+            {showBalance ? `$${(xlmBalance * 0.11 + usdcBalance).toFixed(2)}` : MASKED_AMOUNT}
           </p>
         </div>
       </div>
