@@ -31,28 +31,27 @@ export function WalletCard({
   }
 
   const displayAddress = address.slice(0, 4) + '...' + address.slice(-4)
+import type { AssetBalance } from '@/features/dashboard/models'
+import { Sparkline } from '@/components/sparkline'
+
+interface WalletCardProps {
+  asset: AssetBalance
+}
+
+/** Per-asset balance card: one is rendered for every asset the wallet holds. */
+export function WalletCard({ asset }: WalletCardProps) {
+  const { code, issuer, balance, value, change24h, history } = asset
+  const change = change24h ?? 0
+  const isNative = issuer === 'native'
+  const displayIssuer = isNative ? 'Native asset' : `${issuer.slice(0, 6)}...${issuer.slice(-4)}`
+  const trend = change > 0 ? 'up' : change < 0 ? 'down' : 'flat'
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/20 via-card to-card border border-primary/30 p-8 shadow-lg">
-      {/* Decorative background elements */}
-      <div className="absolute top-0 right-0 w-40 h-40 bg-primary/5 rounded-full -mr-20 -mt-20" />
-      <div className="absolute bottom-0 left-0 w-32 h-32 bg-primary/5 rounded-full -ml-16 -mb-16" />
-
-      <div className="relative space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-muted-foreground">Wallet Address</p>
-            <div className="flex items-center gap-2 mt-1">
-              <code className="text-lg font-mono text-primary">{displayAddress}</code>
-              <button
-                onClick={copyAddress}
-                className="text-muted-foreground hover:text-primary transition-colors"
-              >
-                <Copy size={16} />
-              </button>
-            </div>
-            {copied && <p className="text-xs text-primary mt-1">Copied!</p>}
+    <div className="rounded-2xl bg-gradient-to-br from-primary/10 via-card to-card border border-border p-5 space-y-4 hover:border-primary/50 transition-colors">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+            <span className="text-sm font-bold text-primary">{code.slice(0, 1)}</span>
           </div>
           {onToggleHideAmounts && (
             <button
@@ -84,8 +83,30 @@ export function WalletCard({
               {showBalance ? usdcBalance.toFixed(2) : MASKED_AMOUNT}
             </p>
             <p className="text-xs text-muted-foreground mt-1">1:1 USD</p>
+          <div>
+            <p className="font-semibold text-foreground">{code}</p>
+            <p className="text-xs text-muted-foreground font-mono">{displayIssuer}</p>
           </div>
         </div>
+        {change24h !== undefined && (
+          <span
+            className={`text-sm font-semibold ${
+              trend === 'up'
+                ? 'text-green-500'
+                : trend === 'down'
+                  ? 'text-red-500'
+                  : 'text-muted-foreground'
+            }`}
+          >
+            {change > 0 ? '+' : ''}
+            {change.toFixed(2)}%
+          </span>
+        )}
+      </div>
+
+      {history && history.length > 1 && (
+        <Sparkline points={history} trend={trend} label={`${code} value over the last 7 days`} />
+      )}
 
         {/* Total Value */}
         <div className="pt-4 border-t border-border">
@@ -93,6 +114,14 @@ export function WalletCard({
           <p className="text-4xl font-bold text-primary mt-2">
             {showBalance ? `$${(xlmBalance * 0.11 + usdcBalance).toFixed(2)}` : MASKED_AMOUNT}
           </p>
+      <div className="flex items-end justify-between pt-2 border-t border-border">
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Balance</p>
+          <p className="text-xl font-bold text-foreground mt-1">{balance.toFixed(4)}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">Value</p>
+          <p className="text-xl font-bold text-primary mt-1">${value.toFixed(2)}</p>
         </div>
       </div>
     </div>

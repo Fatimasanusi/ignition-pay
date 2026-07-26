@@ -1,23 +1,46 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ThemeMode, applyTheme, getStoredTheme, storeTheme } from '@/lib/theme'
 
 export function useTheme() {
   const [mode, setModeState] = useState<ThemeMode>('dark')
+  const [hydrated, setHydrated] = useState(false)
+  const mqlRef = useRef<MediaQueryList | null>(null)
+  const handlerRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const stored = getStoredTheme()
     setModeState(stored)
     applyTheme(stored)
-
-    if (stored === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      const handler = () => applyTheme('system')
-      mq.addEventListener('change', handler)
-      return () => mq.removeEventListener('change', handler)
-    }
+    setHydrated(true)
   }, [])
+
+  useEffect(() => {
+    if (!hydrated) return
+
+    const mql = mqlRef.current ?? window.matchMedia('(prefers-color-scheme: dark)')
+    mqlRef.current = mql
+
+    if (handlerRef.current) {
+      mql.removeEventListener('change', handlerRef.current)
+      handlerRef.current = null
+    }
+
+    if (mode === 'system') {
+      const handler = () => applyTheme('system')
+      handlerRef.current = handler
+      mql.addEventListener('change', handler)
+      applyTheme('system')
+    }
+
+    return () => {
+      if (handlerRef.current) {
+        mql.removeEventListener('change', handlerRef.current)
+        handlerRef.current = null
+      }
+    }
+  }, [mode, hydrated])
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode)
@@ -29,9 +52,9 @@ export function useTheme() {
     setMode(mode === 'dark' ? 'light' : 'dark')
   }, [mode, setMode])
 
-  const isDark = mode === 'dark'
-  const isLight = mode === 'light'
+  const isDark = hydrated && (mode === 'dark' || (mode === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches))
+  const isLight = hydrated && !isDark
   const isSystem = mode === 'system'
 
-  return { mode, setMode, toggle, isDark, isLight, isSystem }
+  return { mode, setMode, toggle, isDark, isLight, isSystem, hydrated }
 }
