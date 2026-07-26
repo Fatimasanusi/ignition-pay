@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { MASKED_AMOUNT } from '@/hooks/use-hide-balances'
 
 interface PortfolioSummaryCardProps {
   address: string
@@ -12,6 +13,10 @@ interface PortfolioSummaryCardProps {
   updatedAt: string | null
   isRefreshing: boolean
   isLive: boolean
+  /** When true, the portfolio value is masked for privacy. */
+  hideAmounts?: boolean
+  /** Flips the shared privacy preference. */
+  onToggleHideAmounts?: () => void
   onRefresh: () => void
 }
 
@@ -35,10 +40,12 @@ export function PortfolioSummaryCard({
   updatedAt,
   isRefreshing,
   isLive,
+  hideAmounts = false,
+  onToggleHideAmounts,
   onRefresh,
 }: PortfolioSummaryCardProps) {
-  const [showBalance, setShowBalance] = useState(true)
   const [copied, setCopied] = useState(false)
+  const showBalance = !hideAmounts
 
   const copyAddress = () => {
     navigator.clipboard.writeText(address)
@@ -73,7 +80,8 @@ export function PortfolioSummaryCard({
             {copied && <p className="text-xs text-primary mt-1">Copied!</p>}
           </div>
           <button
-            onClick={() => setShowBalance(!showBalance)}
+            onClick={onToggleHideAmounts}
+            aria-pressed={hideAmounts}
             aria-label={showBalance ? 'Hide portfolio value' : 'Show portfolio value'}
             className="text-muted-foreground hover:text-primary transition-colors"
           >
@@ -85,7 +93,7 @@ export function PortfolioSummaryCard({
         <div>
           <p className="text-xs text-muted-foreground uppercase tracking-wide">Total Value</p>
           <p className="text-4xl font-bold text-primary mt-2">
-            {showBalance ? `$${totalValue.toFixed(2)}` : '••••••'}
+            {showBalance ? `$${totalValue.toFixed(2)}` : MASKED_AMOUNT}
           </p>
           <p className="text-sm text-muted-foreground mt-2">
             {assetCount} {assetCount === 1 ? 'asset' : 'assets'} ·{' '}
