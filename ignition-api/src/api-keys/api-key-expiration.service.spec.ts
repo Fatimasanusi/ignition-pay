@@ -6,9 +6,12 @@ describe('ApiKeyExpirationService', () => {
   let prisma: { apiKey: { updateMany: jest.Mock; update: jest.Mock } };
   let config: { get: jest.Mock };
 
+  let emailQueue: { add: jest.Mock };
+
   beforeEach(() => {
     prisma = {
       apiKey: {
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue({}),
       },
@@ -18,9 +21,14 @@ describe('ApiKeyExpirationService', () => {
       get: jest.fn().mockReturnValue('3600000'),
     };
 
+    emailQueue = {
+      add: jest.fn().mockResolvedValue({}),
+    };
+
     service = new ApiKeyExpirationService(
       prisma as never,
       config as unknown as ConfigService,
+      emailQueue as never,
     );
   });
 

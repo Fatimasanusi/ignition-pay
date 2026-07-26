@@ -30,6 +30,13 @@ export class SessionService {
   private readonly accessTtlSeconds: number;
   /** Refresh-token / session lifetime in seconds (default 7 days) */
   private readonly sessionTtlSeconds: number;
+  /**
+   * Issue #264 — Idle timeout in seconds.
+   * A session is invalidated when the gap between NOW and `lastSeenAt`
+   * exceeds this value, even if the absolute `expiresAt` has not been
+   * reached.  Defaults to 30 minutes (1800 s).  Set to 0 to disable.
+   */
+  private readonly idleTimeoutSeconds: number;
 
   constructor(
     @Inject(CACHE_MANAGER) private readonly cache: Keyv,
@@ -43,6 +50,17 @@ export class SessionService {
       'SESSION_TTL_SECONDS',
       604800,
     ); // 7d
+    this.idleTimeoutSeconds = this.config.get<number>(
+      'SESSION_IDLE_TIMEOUT_SECONDS',
+      1800,
+    ); // 30 min
+  }
+
+  /** Returns true when the session has exceeded the idle timeout window. */
+  isIdleExpired(session: SessionMetadata): boolean {
+    if (this.idleTimeoutSeconds <= 0) return false;
+    const idleMs = this.idleTimeoutSeconds * 1000;
+    return Date.now() - session.lastSeenAt > idleMs;
   }
 
   /** Generate a cryptographically random session ID */
@@ -97,7 +115,15 @@ export class SessionService {
   }
 
   /**
-   * Look up a session by ID. Returns null if not found or expired.
+   * Look up a session by ID.
+   * Returns null if not found, absolutely expired, or idle-timed-out.
+   *
+   * Issue #264 — Idle timeout:
+   *   A session is invalidated and freed from Redis when the time since
+   *   `lastSeenAt` exceeds `SESSION_IDLE_TIMEOUT_SECONDS`, even if the
+   *   absolute `expiresAt` horizon has not yet been reached.  The Redis
+   *   key is deleted immediately so the slot is freed without waiting for
+   *   the TTL to drain naturally.
    */
   async getSession(sessionId: string): Promise<SessionMetadata | null> {
     const raw = await this.cache.get<string>(SESSION_KEY(sessionId));
@@ -105,10 +131,24 @@ export class SessionService {
 
     try {
       const session: SessionMetadata = JSON.parse(raw);
+
+      // Absolute expiry check
       if (Date.now() > session.expiresAt) {
         await this.revokeSession(session.userId, sessionId);
         return null;
       }
+
+      // Issue #264 — Idle timeout check
+      if (this.isIdleExpired(session)) {
+        this.logger.log(
+          `Session ${sessionId} idle-expired for user ${session.userId} ` +
+            `(idle ${Math.round((Date.now() - session.lastSeenAt) / 1000)}s > ` +
+            `limit ${this.idleTimeoutSeconds}s)`,
+        );
+        await this.revokeSession(session.userId, sessionId);
+        return null;
+      }
+
       return session;
     } catch {
       return null;

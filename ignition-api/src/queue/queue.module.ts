@@ -7,11 +7,15 @@ import {
   QUEUE_CONTRACT_EVENTS,
   QUEUE_ANALYTICS,
   QUEUE_PAYMENTS,
+  QUEUE_HORIZON,
 } from './queue.constants';
 import { AnalyticsProcessor } from './processors/analytics.processor';
 import { ContractEventsProcessor } from './processors/contract-events.processor';
 import { EmailProcessor } from './processors/email.processor';
 import { PaymentProcessor } from './processors/payment.processor';
+import { HorizonPollingProcessor } from './processors/horizon-polling.processor';
+import { HorizonPollingScheduler } from './processors/horizon-polling.scheduler';
+import { MilestoneProcessor } from './processors/milestone.processor';
 
 const DEAD_LETTER_SETTINGS = {
   attempts: 3,
@@ -34,10 +38,19 @@ const DEAD_LETTER_SETTINGS = {
       { name: QUEUE_CONTRACT_EVENTS, defaultJobOptions: DEAD_LETTER_SETTINGS },
       { name: QUEUE_ANALYTICS, defaultJobOptions: DEAD_LETTER_SETTINGS },
       { name: QUEUE_PAYMENTS, defaultJobOptions: DEAD_LETTER_SETTINGS },
+      { name: QUEUE_HORIZON, defaultJobOptions: DEAD_LETTER_SETTINGS },
     ),
     PrismaModule,
+    ConfigModule,
   ],
-  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor, PaymentProcessor],
+  providers: [
+    EmailProcessor,
+    ContractEventsProcessor,
+    AnalyticsProcessor,
+    HorizonPollingProcessor,
+    HorizonPollingScheduler,
+  ],
+  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor, MilestoneProcessor],
   exports: [BullModule],
 })
 export class QueueModule {}

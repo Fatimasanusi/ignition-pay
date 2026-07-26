@@ -1,7 +1,8 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Param, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
@@ -17,13 +18,19 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @Post()
+  @Post(':walletId')
   @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
   @RequireScope('write')
-  @ApiOperation({ summary: 'Initiate a payment' })
+  @ApiOperation({ summary: 'Initiate a payment from a wallet' })
+  @ApiParam({ name: 'walletId', description: 'Sender wallet ID' })
   @ApiResponse({ status: 201, description: 'Payment queued' })
   @ApiResponse({ status: 400, description: 'Invalid payment details' })
-  create(@Body() dto: CreatePaymentDto) {
-    return this.paymentsService.initiatePayment(dto);
+  @ApiResponse({
+    status: 403,
+    description: 'Wallet is suspended or closed',
+  })
+  @ApiResponse({ status: 404, description: 'Wallet not found' })
+  create(@Param('walletId') walletId: string, @Body() dto: CreatePaymentDto) {
+    return this.paymentsService.initiatePayment(walletId, dto);
   }
 }

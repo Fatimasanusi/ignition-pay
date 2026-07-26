@@ -28,6 +28,7 @@ describe('Session Module', () => {
       get: jest.fn().mockImplementation((key, defaultValue) => {
         if (key === 'SESSION_ACCESS_TTL_SECONDS') return 900;
         if (key === 'SESSION_TTL_SECONDS') return 604800;
+        if (key === 'SESSION_IDLE_TIMEOUT_SECONDS') return 1800;
         if (key === 'JWT_SECRET') return 'secret';
         return defaultValue;
       }),
@@ -123,6 +124,64 @@ describe('Session Module', () => {
       expect(res).toBeNull();
     });
 
+    it('should return null and revoke if session is idle-expired (Issue #264)', async () => {
+      // idleTimeoutSeconds = 1800 (30 min) from mockConfig
+      const mockSession: SessionMetadata = {
+        sessionId: 's1',
+        userId: 'u1',
+        walletAddress: 'w1',
+        role: 'USER',
+        createdAt: Date.now() - 7200000,
+        expiresAt: Date.now() + 100000, // absolute expiry is still valid
+        lastSeenAt: Date.now() - 1801000, // but idle > 30 min
+      };
+      mockCache.get.mockImplementation(async (key) => {
+        if (key === 'session:s1') return JSON.stringify(mockSession);
+        if (key === 'user_sessions:u1') return JSON.stringify(['s1']);
+        return null;
+      });
+
+      const res = await sessionService.getSession('s1');
+      expect(res).toBeNull();
+      expect(mockCache.delete).toHaveBeenCalledWith('session:s1');
+    });
+
+    it('should NOT revoke a session that is within the idle window (Issue #264)', async () => {
+      const mockSession: SessionMetadata = {
+        sessionId: 's1',
+        userId: 'u1',
+        walletAddress: 'w1',
+        role: 'USER',
+        createdAt: Date.now() - 600000,
+        expiresAt: Date.now() + 100000,
+        lastSeenAt: Date.now() - 300000, // 5 min ago — within 30-min window
+      };
+      mockCache.get.mockResolvedValue(JSON.stringify(mockSession));
+
+      const res = await sessionService.getSession('s1');
+      expect(res).toEqual(mockSession);
+      expect(mockCache.delete).not.toHaveBeenCalled();
+    });
+
+    it('isIdleExpired() returns false when idleTimeoutSeconds is 0', () => {
+      (mockConfig.get as jest.Mock).mockImplementation((key, def) => {
+        if (key === 'SESSION_IDLE_TIMEOUT_SECONDS') return 0;
+        return def;
+      });
+      // Re-create service with updated config mock
+      const svc = new (sessionService.constructor as any)(mockCache, mockConfig);
+      const session: SessionMetadata = {
+        sessionId: 's1',
+        userId: 'u1',
+        walletAddress: 'w1',
+        role: 'USER',
+        createdAt: Date.now() - 9999999,
+        expiresAt: Date.now() + 1000,
+        lastSeenAt: Date.now() - 9999999, // very idle
+      };
+      expect(svc.isIdleExpired(session)).toBe(false);
+    });
+
     it('should touch session to slide TTL', async () => {
       const mockSession: SessionMetadata = {
         sessionId: 's1',
@@ -186,6 +245,8 @@ describe('Session Module', () => {
         {
           sessionId: 's1',
           userId: 'u1',
+          walletAddress: 'w1',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,
@@ -193,6 +254,8 @@ describe('Session Module', () => {
         {
           sessionId: 's2',
           userId: 'u1',
+          walletAddress: 'w2',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,
@@ -206,6 +269,8 @@ describe('Session Module', () => {
       expect(res).toEqual([
         {
           sessionId: 's1',
+          walletAddress: 'w1',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,
@@ -213,6 +278,8 @@ describe('Session Module', () => {
         },
         {
           sessionId: 's2',
+          walletAddress: 'w2',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,

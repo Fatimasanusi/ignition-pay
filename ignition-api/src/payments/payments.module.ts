@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ConfigModule } from '@nestjs/config';
 import { ApiKeyGuard } from '../api-keys/api-key.guard';
 import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
 import { ApiKeyExpirationService } from '../api-keys/api-key-expiration.service';
@@ -16,6 +17,7 @@ import { PaymentsService } from './payments.service';
     // (where the processor lives), but BullModule.registerQueue is idempotent.
     BullModule.registerQueue({ name: QUEUE_PAYMENTS }),
   ],
+  imports: [PrismaModule, ConfigModule],
   controllers: [PaymentsController],
   providers: [
     PaymentsService,

@@ -12,10 +12,12 @@ import {
   LogOut,
   Copy,
   ArrowUpRight,
+  BarChart3,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { APP_VERSION } from '@/lib/version'
+import { useAnalyticsConsent } from '@/hooks/use-consent'
 
 export function SettingsPage() {
   const [showSeed, setShowSeed] = useState(false)
@@ -26,6 +28,7 @@ export function SettingsPage() {
     security: true,
     news: false,
   })
+  const { consented, setConsented } = useAnalyticsConsent()
 
   const mockSeedPhrase =
     'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -243,6 +246,40 @@ export function SettingsPage() {
                 </label>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Privacy Section */}
+        <div className="bg-card rounded-xl border border-border p-8 space-y-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
+              <BarChart3 size={20} className="text-orange-500" />
+            </div>
+            <h2 className="text-xl font-bold text-foreground">Privacy</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-4">
+              <div>
+                <p className="font-semibold text-foreground">
+                  Analytics &amp; Usage Data
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Help improve Ignition Pay by sharing anonymous usage data.
+                  No personal or financial information is collected.
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={consented}
+                  onChange={() => setConsented(!consented)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-muted peer-checked:bg-primary rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all" />
+              </label>
+            </div>
           </div>
         </div>
 

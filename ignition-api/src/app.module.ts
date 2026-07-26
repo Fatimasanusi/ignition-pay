@@ -31,6 +31,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { SentryMiddleware } from './common/sentry/sentry.middleware';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
     PaymentsModule,
     AddressesModule,
     AnalyticsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [
