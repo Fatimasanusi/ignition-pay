@@ -166,6 +166,41 @@ export class AddressesService {
     if (wallet.userId !== userId)
       throw new NotFoundException('Wallet not found');
 
+    // Re-use an AVAILABLE address for this wallet if one exists, so we don't
+    // create unbounded new addresses on repeated calls.
+    const reusable = await this.prisma.depositAddress.findFirst({
+      where: { walletId, status: 'AVAILABLE' },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (reusable) {
+      // Transition back to ALLOCATED and refresh allocatedAt.
+      const reallocated = await this.prisma.depositAddress.update({
+        where: { id: reusable.id },
+        data: {
+          status: 'ALLOCATED',
+          allocatedAt: new Date(),
+          label: label ?? reusable.label,
+        },
+      });
+
+      // Mirror allocation timestamp on the canonical Address row if present.
+      await this.prisma.address.updateMany({
+        where: { address: reallocated.address },
+        data: { allocatedAt: reallocated.allocatedAt, lastActivityAt: new Date() },
+      });
+
+      return {
+        id: reallocated.id,
+        address: reallocated.address,
+        walletId: reallocated.walletId,
+        network: reallocated.network,
+        status: reallocated.status,
+        label: reallocated.label,
+        allocatedAt: reallocated.allocatedAt,
+      };
+    }
+
     // Generate a unique Stellar keypair address
     let address: string;
     let attempts = 0;
@@ -182,8 +217,35 @@ export class AddressesService {
       throw new ConflictException('Failed to generate a unique address');
     }
 
+    const now = new Date();
+
     const depositAddress = await this.prisma.depositAddress.create({
-      data: { address, walletId, network, label: label ?? null },
+      data: {
+        address,
+        walletId,
+        network,
+        label: label ?? null,
+        status: 'ALLOCATED',
+        allocatedAt: now,
+      },
+    });
+
+    // Keep the Address table in sync: create a canonical row if it doesn't
+    // exist yet so allocatedAt/lastActivityAt are tracked in one place.
+    await this.prisma.address.upsert({
+      where: { address },
+      create: {
+        address,
+        network,
+        walletId,
+        allocatedAt: now,
+        lastActivityAt: now,
+      },
+      update: {
+        walletId,
+        allocatedAt: now,
+        lastActivityAt: now,
+      },
     });
 
     return {
@@ -207,6 +269,31 @@ export class AddressesService {
     return this.prisma.depositAddress.findMany({
       where: { walletId },
       orderBy: { allocatedAt: 'desc' },
+    });
+  }
+
+  /**
+   * Marks a DepositAddress as AVAILABLE (released) once activity on it has
+   * ceased.  Callers (e.g. a webhook handler) should invoke this after a
+   * deposit has been fully reconciled so the address can be re-used.
+   */
+  async releaseDepositAddress(depositAddressId: string): Promise<void> {
+    const existing = await this.prisma.depositAddress.findUnique({
+      where: { id: depositAddressId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Deposit address not found');
+    }
+
+    await this.prisma.depositAddress.update({
+      where: { id: depositAddressId },
+      data: { status: 'AVAILABLE' },
+    });
+
+    // Reflect the release in the Address table so lastActivityAt is current.
+    await this.prisma.address.updateMany({
+      where: { address: existing.address },
+      data: { lastActivityAt: new Date() },
     });
   }
 

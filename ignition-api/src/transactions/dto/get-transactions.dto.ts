@@ -42,26 +42,40 @@ export class GetTransactionsQueryDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['PENDING', 'CONFIRMED', 'REFUNDED', 'FAILED'])
+  @IsIn(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'])
   status?: string;
 
   @IsOptional()
   @IsString()
   type?: string;
+
+  /**
+   * Filter by asset code, e.g. "XLM", "USDC".
+   * Case-insensitive exact match against the donation's assetCode.
+   */
+  @IsOptional()
+  @IsString()
+  asset?: string;
+
+  /**
+   * Free-text search over counterparty wallet address (donorId) and tx hash.
+   * Partial, case-insensitive match.
+   */
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class TransactionDto {
   id: string;
+  fromWalletId: string;
+  toWalletId: string;
   amount: number;
   assetCode: string;
-  txHash: string | null;
+  stellarTxHash: string | null;
   status: string;
-  type: string;
-  donorId: string;
-  campaignId: string;
-  donatedAt: Date;
-  confirmedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export class GetTransactionsResponseDto {
@@ -70,4 +84,13 @@ export class GetTransactionsResponseDto {
   nextCursor: string | null;
   hasNextPage: boolean;
   limit: number;
+}
+
+export class SubmitTransactionDto {
+  fromWalletId: string;
+  toWalletId: string;
+  amount: string;
+  assetCode?: string;
+  /** Idempotency key — provide the Stellar tx hash to dedupe retries (#244) */
+  stellarTxHash?: string;
 }

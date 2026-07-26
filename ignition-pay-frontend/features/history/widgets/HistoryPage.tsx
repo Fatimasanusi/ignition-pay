@@ -14,6 +14,7 @@ const mockTransactions = [
     asset: 'XLM',
     amount: 100.0,
     recipient: 'GBJCHUKZMTFSLOMNC7P4TS4VJJBTCYL3YCWKEANE7FCNHWHP6ZPWPX3',
+    txHash: 'abc123def456',
     timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
     status: 'confirmed' as const,
   },
@@ -23,6 +24,7 @@ const mockTransactions = [
     asset: 'USDC',
     amount: 500.0,
     recipient: 'GBJCHUKZMTFSLOMNC7P4TS4VJJBTCYL3YCWKEANE7FCNHWHP6ZPWPX3',
+    txHash: 'bcd234ef567',
     timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
     status: 'confirmed' as const,
   },
@@ -32,6 +34,7 @@ const mockTransactions = [
     asset: 'AQUA',
     amount: 50.0,
     recipient: 'GAJDLFWC3H2LMYMVLYWE3MID4YSKKFVDBMPUEPBJ4PBGQRGKQTKJLXDX',
+    txHash: 'cde345fg678',
     timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000),
     status: 'pending' as const,
   },
@@ -41,6 +44,7 @@ const mockTransactions = [
     asset: 'XLM',
     amount: 250.5,
     recipient: 'GCJQNZFYXGX6XNXAKF3CDXZ3XGNXSJN3FVXQXGNJQXGNJXGNJXGNJXG',
+    txHash: 'def456gh789',
     timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000),
     status: 'confirmed' as const,
   },
@@ -50,6 +54,7 @@ const mockTransactions = [
     asset: 'USDC',
     amount: 1000.0,
     recipient: 'GBQABHNZ2EXZCVSQGX4N3TDPQF3Z2JKPFQZQGJXGNJQXGNJXGNJXGNJXG',
+    txHash: 'efg567hi890',
     timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
     status: 'confirmed' as const,
   },
@@ -59,24 +64,50 @@ const mockTransactions = [
     asset: 'XLM',
     amount: 75.25,
     recipient: 'GCJQNZFYXGX6XNXAKF3CDXZ3XGNXSJN3FVXQXGNJQXGNJXGNJXGNJXG',
+    txHash: 'fgh678ij901',
     timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     status: 'confirmed' as const,
   },
 ]
 
+// Derive the set of distinct asset codes from the mock data
+const ASSET_OPTIONS = ['all', ...Array.from(new Set(mockTransactions.map((t) => t.asset)))]
+const STATUS_OPTIONS = ['all', 'confirmed', 'pending'] as const
+type StatusOption = (typeof STATUS_OPTIONS)[number]
+
 export function HistoryPage() {
   const [filterType, setFilterType] = useState<'all' | 'sent' | 'received'>('all')
+  const [filterAsset, setFilterAsset] = useState<string>('all')
+  const [filterStatus, setFilterStatus] = useState<StatusOption>('all')
+  const [dateFrom, setDateFrom] = useState<string>('')
+  const [dateTo, setDateTo] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
 
   const filteredTransactions = mockTransactions.filter((tx) => {
     if (filterType !== 'all' && tx.type !== filterType) return false
-    if (
-      searchTerm &&
-      !tx.asset.toLowerCase().includes(searchTerm.toLowerCase()) &&
-      !tx.recipient.toLowerCase().includes(searchTerm.toLowerCase())
-    ) {
-      return false
+    if (filterAsset !== 'all' && tx.asset !== filterAsset) return false
+    if (filterStatus !== 'all' && tx.status !== filterStatus) return false
+
+    if (dateFrom) {
+      const from = new Date(dateFrom)
+      from.setHours(0, 0, 0, 0)
+      if (tx.timestamp < from) return false
     }
+    if (dateTo) {
+      const to = new Date(dateTo)
+      to.setHours(23, 59, 59, 999)
+      if (tx.timestamp > to) return false
+    }
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase()
+      const matchesAddress = tx.recipient.toLowerCase().includes(q)
+      const matchesAsset = tx.asset.toLowerCase().includes(q)
+      // txHash: exact match (trimmed)
+      const matchesTxHash = tx.txHash?.toLowerCase() === q
+      if (!matchesAddress && !matchesAsset && !matchesTxHash) return false
+    }
+
     return true
   })
 
@@ -85,6 +116,23 @@ export function HistoryPage() {
     sent: mockTransactions.filter((tx) => tx.type === 'sent').length,
     received: mockTransactions.filter((tx) => tx.type === 'received').length,
     totalVolume: mockTransactions.reduce((acc, tx) => acc + tx.amount, 0),
+  }
+
+  const hasActiveFilters =
+    filterType !== 'all' ||
+    filterAsset !== 'all' ||
+    filterStatus !== 'all' ||
+    dateFrom !== '' ||
+    dateTo !== '' ||
+    searchTerm !== ''
+
+  function clearFilters() {
+    setFilterType('all')
+    setFilterAsset('all')
+    setFilterStatus('all')
+    setDateFrom('')
+    setDateTo('')
+    setSearchTerm('')
   }
 
   return (
@@ -134,7 +182,9 @@ export function HistoryPage() {
 
       {/* Filters and Search */}
       <div className="border-b border-border bg-card/30 backdrop-blur-sm">
-        <div className="px-6 py-4 max-w-7xl mx-auto">
+        <div className="px-6 py-4 max-w-7xl mx-auto space-y-3">
+
+          {/* Row 1: search + export */}
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex-1 min-w-64">
               <div className="relative">
@@ -144,40 +194,94 @@ export function HistoryPage() {
                 />
                 <input
                   type="text"
-                  placeholder="Search by asset or address..."
+                  placeholder="Search by address, asset, or tx hash…"
                   className="w-full pl-10 pr-4 py-2 rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant={filterType === 'all' ? 'default' : 'outline'}
-                onClick={() => setFilterType('all')}
-                size="sm"
-              >
-                All
-              </Button>
-              <Button
-                variant={filterType === 'sent' ? 'default' : 'outline'}
-                onClick={() => setFilterType('sent')}
-                size="sm"
-              >
-                Sent
-              </Button>
-              <Button
-                variant={filterType === 'received' ? 'default' : 'outline'}
-                onClick={() => setFilterType('received')}
-                size="sm"
-              >
-                Received
-              </Button>
-            </div>
+
+            {/* Asset dropdown */}
+            <select
+              aria-label="Filter by asset"
+              className="h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:border-primary"
+              value={filterAsset}
+              onChange={(e) => setFilterAsset(e.target.value)}
+            >
+              {ASSET_OPTIONS.map((a) => (
+                <option key={a} value={a}>
+                  {a === 'all' ? 'All assets' : a}
+                </option>
+              ))}
+            </select>
+
             <Button variant="outline" size="sm">
               <Download size={16} className="mr-2" />
               Export
             </Button>
+          </div>
+
+          {/* Row 2: direction chips + status chips + date range */}
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Direction chips */}
+            <div className="flex gap-2" role="group" aria-label="Filter by direction">
+              {(['all', 'sent', 'received'] as const).map((d) => (
+                <Button
+                  key={d}
+                  variant={filterType === d ? 'default' : 'outline'}
+                  onClick={() => setFilterType(d)}
+                  size="sm"
+                >
+                  {d.charAt(0).toUpperCase() + d.slice(1)}
+                </Button>
+              ))}
+            </div>
+
+            {/* Status chips */}
+            <div className="flex gap-2" role="group" aria-label="Filter by status">
+              {STATUS_OPTIONS.map((s) => (
+                <Button
+                  key={s}
+                  variant={filterStatus === s ? 'default' : 'outline'}
+                  onClick={() => setFilterStatus(s)}
+                  size="sm"
+                >
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </Button>
+              ))}
+            </div>
+
+            {/* Date range */}
+            <div className="flex items-center gap-2 ml-auto">
+              <label className="text-xs text-muted-foreground whitespace-nowrap" htmlFor="date-from">
+                From
+              </label>
+              <input
+                id="date-from"
+                type="date"
+                className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:border-primary"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(e) => setDateFrom(e.target.value)}
+              />
+              <label className="text-xs text-muted-foreground whitespace-nowrap" htmlFor="date-to">
+                To
+              </label>
+              <input
+                id="date-to"
+                type="date"
+                className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:border-primary"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(e) => setDateTo(e.target.value)}
+              />
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -193,15 +297,19 @@ export function HistoryPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {filteredTransactions.map((tx) => (
-              <div key={tx.id}>
-                <TransactionRow {...tx} />
-              </div>
-            ))}
+            {filteredTransactions.map((tx) => {
+              // txHash is used for local search matching only; TransactionRow
+              // doesn't accept it as a prop so we strip it before spreading.
+              const { txHash: _txHash, ...rowProps } = tx
+              return (
+                <div key={tx.id}>
+                  <TransactionRow {...rowProps} />
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
     </div>
   )
 }
-
