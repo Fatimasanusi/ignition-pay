@@ -33,7 +33,7 @@ export class GetTransactionsQueryDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['PENDING', 'CONFIRMED', 'REFUNDED', 'FAILED'])
+  @IsIn(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'])
   status?: string;
 
   @IsOptional()
@@ -59,16 +59,14 @@ export class GetTransactionsQueryDto {
 
 export class TransactionDto {
   id: string;
+  fromWalletId: string;
+  toWalletId: string;
   amount: number;
   assetCode: string;
-  txHash: string | null;
+  stellarTxHash: string | null;
   status: string;
-  type: string;
-  donorId: string;
-  campaignId: string;
-  donatedAt: Date;
-  confirmedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export class GetTransactionsResponseDto {
@@ -76,4 +74,13 @@ export class GetTransactionsResponseDto {
   total: number;
   page: number;
   limit: number;
+}
+
+export class SubmitTransactionDto {
+  fromWalletId: string;
+  toWalletId: string;
+  amount: string;
+  assetCode?: string;
+  /** Idempotency key — provide the Stellar tx hash to dedupe retries (#244) */
+  stellarTxHash?: string;
 }

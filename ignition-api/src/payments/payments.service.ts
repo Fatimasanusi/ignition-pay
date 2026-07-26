@@ -1,37 +1,39 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { Wallet } from '../wallets/entities/wallet.entity';
-import { WalletLimitService } from '../wallets/services/wallet-limit.service';
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(
-    @InjectRepository(Wallet)
-    private readonly walletRepository: Repository<Wallet>,
-    private readonly walletLimitService: WalletLimitService,
-    private readonly dataSource: DataSource,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async processPayment(senderWalletId: string, dto: CreatePaymentDto) {
-    const senderWallet = await this.walletRepository.findOne({
+  async initiatePayment(senderWalletId: string, dto: CreatePaymentDto) {
+    // Fetch the sender wallet and verify it exists.
+    const senderWallet = await this.prisma.wallet.findUnique({
       where: { id: senderWalletId },
     });
 
     if (!senderWallet) {
-      throw new BadRequestException('Sender wallet not found');
+      throw new NotFoundException('Sender wallet not found');
     }
 
-    // Enforce rolling daily and monthly transfer limits prior to transaction creation
-    await this.walletLimitService.validateTransactionLimits(
-      senderWallet,
-      dto.amount,
-    );
+    // Issue #242: Reject outgoing transactions when the wallet is SUSPENDED.
+    if (senderWallet.status === 'SUSPENDED') {
+      throw new ForbiddenException(
+        'Outgoing transactions are not allowed: wallet is suspended',
+      );
+    }
 
-    // Proceed with payment execution...
-  async initiatePayment(dto: CreatePaymentDto) {
+    if (senderWallet.status === 'CLOSED') {
+      throw new ForbiddenException(
+        'Outgoing transactions are not allowed: wallet is closed',
+      );
+    }
+
     // amount validity (range, precision) is enforced by @IsDecimalAmount on
     // CreatePaymentDto — no redundant guard needed here.
     return {
