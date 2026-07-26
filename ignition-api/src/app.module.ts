@@ -22,6 +22,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { PaymentsModule } from './payments/payments.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { SessionModule } from './session/session.module';
 import { AddressesModule } from './addresses/addresses.module';
@@ -51,6 +52,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     UsersModule,
     WalletsModule,
     TransactionsModule,
+    PaymentsModule,
     AddressesModule,
     AnalyticsModule,
     NotificationsModule,
