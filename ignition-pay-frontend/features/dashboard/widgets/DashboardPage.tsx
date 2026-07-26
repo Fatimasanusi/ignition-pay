@@ -11,6 +11,7 @@ import { InlineEmpty, InlineError, InlineSkeleton } from '@/components/inline-st
 import { groupAssets, portfolioChange24h, totalValue } from '@/features/dashboard/models'
 import { DEMO_WALLET_ADDRESS } from '@/features/dashboard/services'
 import { useWalletBalances } from '@/features/dashboard/state'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 // Mock transactions (to be replaced by real API integration)
 const mockTransactions = [
@@ -65,7 +66,8 @@ export function DashboardPage() {
                 Welcome back! Here&apos;s your wallet overview.
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
+              <ThemeToggle />
               <Link href="/receive">
                 <Button variant="outline">
                   <ArrowDownLeft className="mr-2 h-4 w-4" />
