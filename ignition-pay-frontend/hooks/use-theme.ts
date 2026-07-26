@@ -1,18 +1,29 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ThemeMode, applyTheme, getStoredTheme, storeTheme } from '@/lib/theme'
+import {
+  ThemeMode,
+  ContrastLevel,
+  applyTheme,
+  getStoredTheme,
+  storeTheme,
+  getStoredContrast,
+  storeContrast,
+} from '@/lib/theme'
 
 export function useTheme() {
   const [mode, setModeState] = useState<ThemeMode>('dark')
+  const [contrast, setContrastState] = useState<ContrastLevel>('normal')
   const [hydrated, setHydrated] = useState(false)
   const mqlRef = useRef<MediaQueryList | null>(null)
   const handlerRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const stored = getStoredTheme()
+    const storedContrast = getStoredContrast()
     setModeState(stored)
-    applyTheme(stored)
+    setContrastState(storedContrast)
+    applyTheme(stored, storedContrast)
     setHydrated(true)
   }, [])
 
@@ -28,10 +39,10 @@ export function useTheme() {
     }
 
     if (mode === 'system') {
-      const handler = () => applyTheme('system')
+      const handler = () => applyTheme('system', contrast)
       handlerRef.current = handler
       mql.addEventListener('change', handler)
-      applyTheme('system')
+      applyTheme('system', contrast)
     }
 
     return () => {
@@ -40,13 +51,19 @@ export function useTheme() {
         handlerRef.current = null
       }
     }
-  }, [mode, hydrated])
+  }, [mode, hydrated, contrast])
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode)
     storeTheme(newMode)
-    applyTheme(newMode)
-  }, [])
+    applyTheme(newMode, contrast)
+  }, [contrast])
+
+  const setContrast = useCallback((newContrast: ContrastLevel) => {
+    setContrastState(newContrast)
+    storeContrast(newContrast)
+    applyTheme(mode, newContrast)
+  }, [mode])
 
   const toggle = useCallback(() => {
     setMode(mode === 'dark' ? 'light' : 'dark')
@@ -55,6 +72,18 @@ export function useTheme() {
   const isDark = hydrated && (mode === 'dark' || (mode === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches))
   const isLight = hydrated && !isDark
   const isSystem = mode === 'system'
+  const isHighContrast = contrast === 'high'
 
-  return { mode, setMode, toggle, isDark, isLight, isSystem, hydrated }
+  return {
+    mode,
+    contrast,
+    setMode,
+    setContrast,
+    toggle,
+    isDark,
+    isLight,
+    isSystem,
+    isHighContrast,
+    hydrated,
+  }
 }
