@@ -3,7 +3,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { ThemeMode, applyTheme, getStoredTheme, storeTheme } from '@/lib/theme'
 
+function getInitialTheme(): ThemeMode {
+  if (typeof window === 'undefined') return 'system'
+  return getStoredTheme()
+}
+
 export function useTheme() {
+  const [mode, setModeState] = useState<ThemeMode>(getInitialTheme)
+
+  useEffect(() => {
+    const current = getStoredTheme()
+    setModeState(current)
+    applyTheme(current)
+
+    if (current === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const [mode, setModeState] = useState<ThemeMode>('dark')
   const [hydrated, setHydrated] = useState(false)
   const mqlRef = useRef<MediaQueryList | null>(null)
@@ -56,5 +70,6 @@ export function useTheme() {
   const isLight = hydrated && !isDark
   const isSystem = mode === 'system'
 
+}
   return { mode, setMode, toggle, isDark, isLight, isSystem, hydrated }
 }
