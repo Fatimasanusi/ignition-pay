@@ -7,8 +7,10 @@ import { ApiKeyScopeGuard } from './api-key-scope.guard';
 import { ApiKeyExpirationService } from './api-key-expiration.service';
 import { AdminGuard } from '../users/guards/admin.guard';
 
+import { QueueModule } from '../queue/queue.module';
+
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, QueueModule],
   controllers: [ApiKeysController],
   providers: [
     ApiKeyGuard,
