@@ -61,4 +61,10 @@ export class UpdateUserDto {
   @IsJSON()
   @MaxLength(5000)
   socialLinks?: string; // JSON stringified object
+
+  @IsOptional()
+  @IsString()
+  @IsJSON()
+  @MaxLength(5000)
+  notificationPreferences?: string; // JSON stringified object
 }

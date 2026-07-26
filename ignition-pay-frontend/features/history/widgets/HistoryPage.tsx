@@ -92,16 +92,32 @@ export function HistoryPage() {
   const filteredTransactions = useMemo(() => {
     return mockTransactions.filter((tx) => {
       if (filterType !== 'all' && tx.type !== filterType) return false
-      if (
-        searchTerm &&
-        !tx.asset.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        !tx.recipient.toLowerCase().includes(searchTerm.toLowerCase())
-      ) {
-        return false
+      if (filterAsset !== 'all' && tx.asset !== filterAsset) return false
+      if (filterStatus !== 'all' && tx.status !== filterStatus) return false
+
+      if (dateFrom) {
+        const from = new Date(dateFrom)
+        from.setHours(0, 0, 0, 0)
+        if (tx.timestamp < from) return false
       }
+      if (dateTo) {
+        const to = new Date(dateTo)
+        to.setHours(23, 59, 59, 999)
+        if (tx.timestamp > to) return false
+      }
+
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase()
+        const matchesAddress = tx.recipient.toLowerCase().includes(q)
+        const matchesAsset = tx.asset.toLowerCase().includes(q)
+        // txHash: exact match (trimmed)
+        const matchesTxHash = tx.txHash?.toLowerCase() === q
+        if (!matchesAddress && !matchesAsset && !matchesTxHash) return false
+      }
+
       return true
     })
-  }, [filterType, searchTerm])
+  }, [filterType, filterAsset, filterStatus, dateFrom, dateTo, searchTerm])
 
   useEffect(() => {
     const firstPage = filteredTransactions.slice(0, PAGE_SIZE)
@@ -142,33 +158,6 @@ export function HistoryPage() {
 
     return () => observer.disconnect()
   }, [cursor, filteredTransactions, hasMore, isLoadingMore])
-  const filteredTransactions = mockTransactions.filter((tx) => {
-    if (filterType !== 'all' && tx.type !== filterType) return false
-    if (filterAsset !== 'all' && tx.asset !== filterAsset) return false
-    if (filterStatus !== 'all' && tx.status !== filterStatus) return false
-
-    if (dateFrom) {
-      const from = new Date(dateFrom)
-      from.setHours(0, 0, 0, 0)
-      if (tx.timestamp < from) return false
-    }
-    if (dateTo) {
-      const to = new Date(dateTo)
-      to.setHours(23, 59, 59, 999)
-      if (tx.timestamp > to) return false
-    }
-
-    if (searchTerm) {
-      const q = searchTerm.toLowerCase()
-      const matchesAddress = tx.recipient.toLowerCase().includes(q)
-      const matchesAsset = tx.asset.toLowerCase().includes(q)
-      // txHash: exact match (trimmed)
-      const matchesTxHash = tx.txHash?.toLowerCase() === q
-      if (!matchesAddress && !matchesAsset && !matchesTxHash) return false
-    }
-
-    return true
-  })
 
   const stats = {
     total: mockTransactions.length,

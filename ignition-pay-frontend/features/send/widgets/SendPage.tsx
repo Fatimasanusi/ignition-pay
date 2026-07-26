@@ -1,21 +1,101 @@
 'use client'
 
-import { useState } from 'react'
-import { Send, Zap, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Send, Zap, AlertCircle, CheckCircle2, CheckCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import Link from 'next/link'
+import { validateStellarAddress } from '@/lib/stellar/strkey'
+import {
+  MEMO_TEXT_MAX_BYTES,
+  MEMO_TYPES,
+  MEMO_TYPE_HINTS,
+  MEMO_TYPE_LABELS,
+  memoByteLength,
+  validateMemo,
+  type MemoType,
+} from '@/lib/stellar/memo'
+import { AssetAmountPicker } from '@/components/asset-amount-picker'
+import { validateAmount, type SendableAsset } from '@/features/send/models'
+import { checkTrustline, type TrustlineCheck } from '@/features/send/services'
+
+const ADDRESS_KIND_LABELS = {
+  publicKey: 'Stellar account',
+  muxedAccount: 'Muxed account',
+  contract: 'Contract address',
+} as const
+
+// Mock holdings (to be replaced by the wallet balance API)
+const sendableAssets: SendableAsset[] = [
+  { code: 'XLM', issuer: 'native', balance: 5234.5, reserved: 1.5 },
+  {
+    code: 'USDC',
+    issuer: 'GBBD47UZQ5ODSQIRQ73RQ5NBAYKU5NK2HRE3ENDQMAIL7UCHQVCD2Z4A',
+    balance: 2150.75,
+  },
+  {
+    code: 'AQUA',
+    issuer: 'GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTGKCYEG5MFWQVMBNXA5W2HAT',
+    balance: 125.3,
+  },
+]
 
 export function SendPage() {
   const [step, setStep] = useState<'form' | 'review' | 'confirmed'>('form')
+  const [recipientTouched, setRecipientTouched] = useState(false)
   const [formData, setFormData] = useState({
     recipient: '',
     amount: '',
     asset: 'XLM',
+    memoType: 'none' as MemoType,
     memo: '',
   })
+  const [trustline, setTrustline] = useState<TrustlineCheck | null>(null)
+  const [isCheckingTrustline, setIsCheckingTrustline] = useState(false)
+
+  const selectedAsset =
+    sendableAssets.find((asset) => asset.code === formData.asset) ?? sendableAssets[0]
+  const amountCheck = useMemo(
+    () => validateAmount(formData.amount, selectedAsset),
+    [formData.amount, selectedAsset],
+  )
+
+  // Verify the recipient can hold the asset once the review step is reached, so
+  // a missing trustline is surfaced before the payment is confirmed.
+  useEffect(() => {
+    if (step !== 'review') return
+
+    const controller = new AbortController()
+    setIsCheckingTrustline(true)
+    setTrustline(null)
+
+    checkTrustline(formData.recipient, selectedAsset.code, selectedAsset.issuer, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setTrustline(result)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsCheckingTrustline(false)
+      })
+
+    return () => controller.abort()
+  }, [step, formData.recipient, selectedAsset.code, selectedAsset.issuer])
+
+  const recipientCheck = useMemo(
+    () => validateStellarAddress(formData.recipient),
+    [formData.recipient],
+  )
+  const memoCheck = useMemo(
+    () => validateMemo(formData.memoType, formData.memo),
+    [formData.memoType, formData.memo],
+  )
+
+  const showRecipientError =
+    recipientTouched && formData.recipient.length > 0 && !recipientCheck.isValid
+  const canReview = recipientCheck.isValid && memoCheck.isValid && amountCheck.isValid
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!canReview) return
     setStep('review')
   }
 
@@ -25,7 +105,8 @@ export function SendPage() {
 
   const handleReset = () => {
     setStep('form')
-    setFormData({ recipient: '', amount: '', asset: 'XLM', memo: '' })
+    setRecipientTouched(false)
+    setFormData({ recipient: '', amount: '', asset: 'XLM', memoType: 'none', memo: '' })
   }
 
   if (step === 'confirmed') {
@@ -156,63 +237,133 @@ export function SendPage() {
                 <input
                   type="text"
                   placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-                  className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+                  className={`w-full px-4 py-3 rounded-lg bg-background border text-foreground placeholder:text-muted-foreground focus:outline-none font-mono text-sm ${
+                    showRecipientError
+                      ? 'border-destructive focus:border-destructive'
+                      : recipientCheck.isValid
+                        ? 'border-green-500/60 focus:border-green-500'
+                        : 'border-border focus:border-primary'
+                  }`}
                   value={formData.recipient}
                   onChange={(e) =>
-                    setFormData({ ...formData, recipient: e.target.value })
+                    setFormData({ ...formData, recipient: e.target.value.trim() })
                   }
+                  onBlur={() => setRecipientTouched(true)}
+                  aria-invalid={showRecipientError}
+                  aria-describedby="recipient-feedback"
+                  autoCapitalize="characters"
+                  spellCheck={false}
                   required
                 />
-                <p className="text-xs text-muted-foreground mt-2">
-                  The Stellar address you want to send funds to
+                <p
+                  id="recipient-feedback"
+                  aria-live="polite"
+                  className={`text-xs mt-2 flex items-center gap-1.5 ${
+                    showRecipientError
+                      ? 'text-destructive'
+                      : recipientCheck.isValid
+                        ? 'text-green-500'
+                        : 'text-muted-foreground'
+                  }`}
+                >
+                  {showRecipientError ? (
+                    <>
+                      <AlertCircle size={13} />
+                      {recipientCheck.error}
+                    </>
+                  ) : recipientCheck.isValid && recipientCheck.kind ? (
+                    <>
+                      <CheckCircle size={13} />
+                      Valid {ADDRESS_KIND_LABELS[recipientCheck.kind]} — checksum verified
+                    </>
+                  ) : (
+                    'The Stellar address you want to send funds to'
+                  )}
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-foreground mb-2">Asset</label>
-                  <select
-                    className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground focus:outline-none focus:border-primary"
-                    value={formData.asset}
-                    onChange={(e) =>
-                      setFormData({ ...formData, asset: e.target.value })
-                    }
-                  >
-                    <option value="XLM">XLM (Stellar Lumens)</option>
-                    <option value="USDC">USDC</option>
-                    <option value="AQUA">AQUA</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-foreground mb-2">Amount</label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    placeholder="0.00"
-                    className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-                    value={formData.amount}
-                    onChange={(e) =>
-                      setFormData({ ...formData, amount: e.target.value })
-                    }
-                    required
-                  />
-                </div>
-              </div>
+              <AssetAmountPicker
+                assets={sendableAssets}
+                selectedCode={formData.asset}
+                amount={formData.amount}
+                onAssetChange={(asset) => setFormData((prev) => ({ ...prev, asset }))}
+                onAmountChange={(amount) => setFormData((prev) => ({ ...prev, amount }))}
+              />
 
               <div>
-                <label className="block text-sm font-semibold text-foreground mb-2">Memo (Optional)</label>
-                <textarea
-                  placeholder="Add a note for this transaction..."
-                  className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none"
-                  rows={3}
-                  value={formData.memo}
+                <label
+                  htmlFor="memo-type"
+                  className="block text-sm font-semibold text-foreground mb-2"
+                >
+                  Memo (Optional)
+                </label>
+                <select
+                  id="memo-type"
+                  className="w-full px-4 py-3 rounded-lg bg-background border border-border text-foreground focus:outline-none focus:border-primary"
+                  value={formData.memoType}
                   onChange={(e) =>
-                    setFormData({ ...formData, memo: e.target.value })
+                    // Switching type invalidates the previous value's format.
+                    setFormData({ ...formData, memoType: e.target.value as MemoType, memo: '' })
                   }
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  Add a note to help identify this transaction
+                >
+                  {MEMO_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {MEMO_TYPE_LABELS[type]}
+                    </option>
+                  ))}
+                </select>
+
+                {formData.memoType !== 'none' && (
+                  <div className="mt-3">
+                    <input
+                      type="text"
+                      aria-label={`Memo ${MEMO_TYPE_LABELS[formData.memoType]}`}
+                      placeholder={
+                        formData.memoType === 'text'
+                          ? 'Invoice 1042'
+                          : formData.memoType === 'id'
+                            ? '1234567890'
+                            : '64 hex characters'
+                      }
+                      className={`w-full px-4 py-3 rounded-lg bg-background border text-foreground placeholder:text-muted-foreground focus:outline-none ${
+                        formData.memo && !memoCheck.isValid
+                          ? 'border-destructive focus:border-destructive'
+                          : 'border-border focus:border-primary'
+                      } ${formData.memoType === 'hash' ? 'font-mono text-sm' : ''}`}
+                      value={formData.memo}
+                      onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+                      aria-invalid={Boolean(formData.memo) && !memoCheck.isValid}
+                      aria-describedby="memo-feedback"
+                      inputMode={formData.memoType === 'id' ? 'numeric' : 'text'}
+                    />
+                    {formData.memoType === 'text' && (
+                      <p className="text-xs text-muted-foreground mt-1 text-right">
+                        {memoByteLength(formData.memo)}/{MEMO_TEXT_MAX_BYTES} bytes
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <p
+                  id="memo-feedback"
+                  aria-live="polite"
+                  className={`text-xs mt-2 ${
+                    formData.memo && !memoCheck.isValid
+                      ? 'text-destructive'
+                      : 'text-muted-foreground'
+                  }`}
+                >
+                  {formData.memo && memoCheck.error
+                    ? memoCheck.error
+                    : MEMO_TYPE_HINTS[formData.memoType]}
                 </p>
+
+                {memoCheck.warning && (
+                  <div className="mt-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex gap-2">
+                    <AlertCircle size={16} className="text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-foreground">{memoCheck.warning}</p>
+                  </div>
+                )}
               </div>
 
               <div className="bg-primary/10 border border-primary/30 rounded-lg p-4 flex gap-3">
@@ -233,7 +384,7 @@ export function SendPage() {
               <Button
                 type="submit"
                 className="flex-1 bg-primary hover:bg-primary/90"
-                disabled={!formData.recipient || !formData.amount}
+                disabled={!canReview}
               >
                 <Send className="mr-2 h-4 w-4" />
                 Review Payment
@@ -266,13 +417,64 @@ export function SendPage() {
                   <span className="text-muted-foreground">Network Fee</span>
                   <span className="font-semibold text-foreground">0.00001 XLM</span>
                 </div>
-                {formData.memo && (
+                <div className="border-t border-border pt-4 flex items-center justify-between">
+                  <span className="text-muted-foreground">Recipient trustline</span>
+                  {isCheckingTrustline ? (
+                    <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 size={14} className="animate-spin" />
+                      Checking…
+                    </span>
+                  ) : trustline?.status === 'ok' ? (
+                    <Badge variant="success">Ready to receive</Badge>
+                  ) : trustline?.status === 'missing' ? (
+                    <Badge variant="destructive">No {formData.asset} trustline</Badge>
+                  ) : trustline?.status === 'unfunded' ? (
+                    <Badge variant="destructive">Account not funded</Badge>
+                  ) : (
+                    <Badge variant="warning">Not verified</Badge>
+                  )}
+                </div>
+                {formData.memoType !== 'none' && formData.memo && (
                   <div className="border-t border-border pt-4">
-                    <p className="text-muted-foreground text-sm mb-1">Memo</p>
-                    <p className="text-foreground">{formData.memo}</p>
+                    <p className="text-muted-foreground text-sm mb-1">
+                      Memo ({MEMO_TYPE_LABELS[formData.memoType]})
+                    </p>
+                    <p
+                      className={`text-foreground ${
+                        formData.memoType === 'hash' ? 'font-mono text-xs break-all' : ''
+                      }`}
+                    >
+                      {formData.memo}
+                    </p>
                   </div>
                 )}
               </div>
+
+              {trustline?.message && (
+                <div
+                  role="alert"
+                  className={`rounded-lg p-4 flex gap-3 border ${
+                    trustline.status === 'unknown'
+                      ? 'bg-yellow-500/10 border-yellow-500/30'
+                      : 'bg-destructive/10 border-destructive/30'
+                  }`}
+                >
+                  <AlertCircle
+                    size={20}
+                    className={`flex-shrink-0 mt-0.5 ${
+                      trustline.status === 'unknown' ? 'text-yellow-500' : 'text-destructive'
+                    }`}
+                  />
+                  <div className="text-sm text-foreground">
+                    <p className="font-semibold">
+                      {trustline.status === 'unknown'
+                        ? 'Trustline not verified'
+                        : 'This payment will likely fail'}
+                    </p>
+                    <p className="text-muted-foreground">{trustline.message}</p>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 flex gap-3">
                 <AlertCircle size={20} className="text-yellow-500 flex-shrink-0 mt-0.5" />
@@ -296,9 +498,14 @@ export function SendPage() {
               <Button
                 className="flex-1 bg-primary hover:bg-primary/90"
                 onClick={handleConfirm}
+                disabled={isCheckingTrustline || trustline?.status === 'unfunded'}
               >
-                <Send className="mr-2 h-4 w-4" />
-                Confirm & Send
+                {isCheckingTrustline ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="mr-2 h-4 w-4" />
+                )}
+                {trustline?.status === 'missing' ? 'Send anyway' : 'Confirm & Send'}
               </Button>
             </div>
           </div>
