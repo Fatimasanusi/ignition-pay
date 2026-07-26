@@ -186,6 +186,7 @@ model ApiKey {
   scope          String    @default("read")
   expiresAt      DateTime?
   lastUsedAt     DateTime?
+  warningSentAt  DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

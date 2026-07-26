@@ -44,4 +44,25 @@ export interface HorizonCheckTxPayload {
   transactionId: string;
   /** Stellar transaction hash already recorded, or the account to watch */
   stellarTxHash?: string;
+// Milestone notifications
+// ---------------------------------------------------------------------------
+
+export const MILESTONE_JOB_COMPLETED = 'milestone-completed';
+export const MILESTONE_JOB_CAMPAIGN_COMPLETED = 'campaign-completed';
+
+export interface MilestoneCompletedPayload {
+  /** The campaign creator's user id – recipient of the notification */
+  creatorId: string;
+  creatorEmail: string;
+  campaignId: string;
+  campaignTitle: string;
+  milestoneId: string;
+  milestoneTitle: string;
+}
+
+export interface CampaignCompletedPayload {
+  creatorId: string;
+  creatorEmail: string;
+  campaignId: string;
+  campaignTitle: string;
 }

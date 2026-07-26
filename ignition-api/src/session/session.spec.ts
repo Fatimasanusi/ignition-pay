@@ -186,6 +186,8 @@ describe('Session Module', () => {
         {
           sessionId: 's1',
           userId: 'u1',
+          walletAddress: 'w1',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,
@@ -193,6 +195,8 @@ describe('Session Module', () => {
         {
           sessionId: 's2',
           userId: 'u1',
+          walletAddress: 'w2',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,
@@ -206,6 +210,8 @@ describe('Session Module', () => {
       expect(res).toEqual([
         {
           sessionId: 's1',
+          walletAddress: 'w1',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,
@@ -213,6 +219,8 @@ describe('Session Module', () => {
         },
         {
           sessionId: 's2',
+          walletAddress: 'w2',
+          role: 'USER',
           createdAt: 1,
           lastSeenAt: 2,
           expiresAt: 3,

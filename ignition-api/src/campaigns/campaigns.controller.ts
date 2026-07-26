@@ -18,6 +18,7 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiParam,
 } from '@nestjs/swagger';
 import { Request } from 'express';
 import { ApiKeyGuard } from '../api-keys/api-key.guard';
@@ -77,6 +78,50 @@ export class CampaignsController {
     }
     const userId = req.user?.sub as string;
     return this.campaignsService.updateCampaign(userId, id, body);
+  }
+
+  /**
+   * PATCH /campaigns/:campaignId/milestones/:milestoneId/complete
+   *
+   * Marks a milestone as COMPLETED.  If all milestones on the campaign are now
+   * complete, the campaign itself is also marked COMPLETED and a notification
+   * is dispatched to the creator.
+   *
+   * Authorization: campaign creator only (enforced in the service layer).
+   */
+  @Patch(':campaignId/milestones/:milestoneId/complete')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
+  @ApiBearerAuth('JWT-auth')
+  @ApiParam({ name: 'campaignId', description: 'Campaign UUID' })
+  @ApiParam({ name: 'milestoneId', description: 'Milestone UUID' })
+  @ApiOperation({
+    summary: 'Complete a milestone',
+    description:
+      'Marks the milestone COMPLETED. If all milestones are now done the ' +
+      'campaign is also marked COMPLETED and notifications are sent.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Milestone (and optionally campaign) marked completed',
+    schema: {
+      type: 'object',
+      properties: {
+        milestone: { type: 'object' },
+        campaignCompleted: { type: 'boolean' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Milestone already completed or failed' })
+  @ApiResponse({ status: 403, description: 'Only the campaign creator can complete milestones' })
+  @ApiResponse({ status: 404, description: 'Campaign or milestone not found' })
+  async completeMilestone(
+    @Param('campaignId') campaignId: string,
+    @Param('milestoneId') milestoneId: string,
+    @Req() req: Request & { user: any },
+  ) {
+    const userId = req.user?.sub as string;
+    return this.campaignsService.completeMilestone(userId, campaignId, milestoneId);
   }
 
   /**

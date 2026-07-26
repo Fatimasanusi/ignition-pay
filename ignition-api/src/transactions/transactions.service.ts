@@ -19,7 +19,8 @@ export class TransactionsService {
   async getTransactions(
     query: GetTransactionsQueryDto,
   ): Promise<GetTransactionsResponseDto> {
-    const { page, limit, dateFrom, dateTo, status, type } = query;
+    const { page, limit, dateFrom, dateTo, status, type, asset, search } =
+      query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.TransactionWhereInput = {};
@@ -27,6 +28,13 @@ export class TransactionsService {
     if (status) where.status = status as any;
     // `type` maps to assetCode in the Transaction model (e.g. "XLM", "USDC").
     if (type) where.assetCode = { equals: type, mode: 'insensitive' };
+
+    // `type` was historically mapped to assetCode; `asset` is the new explicit filter.
+    // When both are provided, `asset` wins.
+    const assetFilter = asset ?? type;
+    if (assetFilter) {
+      where.assetCode = { equals: assetFilter, mode: 'insensitive' };
+    }
 
     if (dateFrom || dateTo) {
       where.createdAt = {
@@ -38,6 +46,18 @@ export class TransactionsService {
     const [total, transactions] = await Promise.all([
       this.prisma.transaction.count({ where }),
       this.prisma.transaction.findMany({
+    // Free-text search: match on txHash (exact, case-insensitive) or donorId
+    // (partial, for counterparty address look-up).
+    if (search) {
+      where.OR = [
+        { txHash: { equals: search, mode: 'insensitive' } },
+        { donorId: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [total, donations] = await Promise.all([
+      this.prisma.donation.count({ where }),
+      this.prisma.donation.findMany({
         where,
         select: {
           id: true,
