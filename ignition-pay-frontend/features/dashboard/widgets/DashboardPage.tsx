@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { WalletCard } from '@/components/wallet-card'
 import { AssetCard } from '@/components/asset-card'
 import { TransactionRow } from '@/components/transaction-row'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 // Mock data (to be replaced by real API integration)
 const mockWallet = {
@@ -81,7 +82,8 @@ export function DashboardPage() {
                 Welcome back! Here&apos;s your wallet overview.
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
+              <ThemeToggle />
               <Link href="/receive">
                 <Button variant="outline">
                   <ArrowDownLeft className="mr-2 h-4 w-4" />
