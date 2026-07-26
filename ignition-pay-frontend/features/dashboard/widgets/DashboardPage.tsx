@@ -1,43 +1,19 @@
 'use client'
 
+import { useMemo } from 'react'
 import Link from 'next/link'
 import { Send, ArrowDownLeft, TrendingUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { WalletCard } from '@/components/wallet-card'
-import { AssetCard } from '@/components/asset-card'
+import { PortfolioSummaryCard } from '@/components/portfolio-summary-card'
 import { TransactionRow } from '@/components/transaction-row'
+import { InlineEmpty, InlineError, InlineSkeleton } from '@/components/inline-state'
+import { groupAssets, portfolioChange24h, totalValue } from '@/features/dashboard/models'
+import { DEMO_WALLET_ADDRESS } from '@/features/dashboard/services'
+import { useWalletBalances } from '@/features/dashboard/state'
+import { ThemeToggle } from '@/components/theme-toggle'
 
-// Mock data (to be replaced by real API integration)
-const mockWallet = {
-  address: 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5K2NQXJ6K4VJKTQVJVQVJVQVJVQ',
-  xlmBalance: 5234.5,
-  usdcBalance: 2150.75,
-}
-
-const mockAssets = [
-  {
-    code: 'XLM',
-    issuer: 'native',
-    balance: 5234.5,
-    value: 575.8,
-    change24h: 5.2,
-  },
-  {
-    code: 'USDC',
-    issuer: 'GBBD47UZQ5ODSQIRQ73RQ5NBAYKU5NK2HRE3ENDQMAIL7UCHQVCD2Z4A',
-    balance: 2150.75,
-    value: 2150.75,
-    change24h: 0.0,
-  },
-  {
-    code: 'AQUA',
-    issuer: 'GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTGKCYEG5MFWQVMBNXA5W2HAT',
-    balance: 125.3,
-    value: 31.33,
-    change24h: -2.1,
-  },
-]
-
+// Mock transactions (to be replaced by real API integration)
 const mockTransactions = [
   {
     id: '1',
@@ -69,6 +45,15 @@ const mockTransactions = [
 ]
 
 export function DashboardPage() {
+  const { snapshot, status, error, isRefreshing, isLive, refresh } =
+    useWalletBalances(DEMO_WALLET_ADDRESS)
+
+  const assets = useMemo(() => snapshot?.assets ?? [], [snapshot])
+  const groups = useMemo(() => groupAssets(assets), [assets])
+  const portfolioValue = useMemo(() => totalValue(assets), [assets])
+  const dailyChange = useMemo(() => portfolioChange24h(assets), [assets])
+  const isPositive = dailyChange >= 0
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -81,7 +66,8 @@ export function DashboardPage() {
                 Welcome back! Here&apos;s your wallet overview.
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
+              <ThemeToggle />
               <Link href="/receive">
                 <Button variant="outline">
                   <ArrowDownLeft className="mr-2 h-4 w-4" />
@@ -101,14 +87,44 @@ export function DashboardPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* Wallet Card */}
-        <WalletCard
-          address={mockWallet.address}
-          xlmBalance={mockWallet.xlmBalance}
-          usdcBalance={mockWallet.usdcBalance}
-        />
+        {/* Portfolio summary */}
+        {status === 'loading' && !snapshot && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="h-56 rounded-2xl border border-border bg-card animate-pulse"
+          >
+            <span className="sr-only">Loading wallet balances</span>
+          </div>
+        )}
 
-        {/* Assets Section */}
+        {status === 'error' && !snapshot && (
+          <InlineError
+            title="Could not load your balances"
+            message={error ?? 'Please try again in a moment.'}
+            onRetry={refresh}
+          />
+        )}
+
+        {snapshot && (
+          <>
+            {status === 'error' && error && (
+              <InlineError title="Balances may be out of date" message={error} onRetry={refresh} />
+            )}
+            <PortfolioSummaryCard
+              address={snapshot.address}
+              totalValue={portfolioValue}
+              change24h={dailyChange}
+              assetCount={assets.length}
+              updatedAt={snapshot.updatedAt}
+              isRefreshing={isRefreshing}
+              isLive={isLive}
+              onRefresh={refresh}
+            />
+          </>
+        )}
+
+        {/* Assets, grouped by asset kind */}
         <div>
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -117,16 +133,70 @@ export function DashboardPage() {
                 Your Stellar assets and balances
               </p>
             </div>
-            <div className="flex items-center gap-2 text-primary">
-              <TrendingUp size={16} />
-              <span className="text-sm font-medium">Portfolio up 3.2% today</span>
+            {snapshot && assets.length > 0 && (
+              <div
+                className={`flex items-center gap-2 ${isPositive ? 'text-primary' : 'text-red-500'}`}
+              >
+                <TrendingUp size={16} />
+                <span className="text-sm font-medium">
+                  Portfolio {isPositive ? 'up' : 'down'} {Math.abs(dailyChange).toFixed(1)}% today
+                </span>
+              </div>
+            )}
+          </div>
+
+          {status === 'loading' && !snapshot && <InlineSkeleton label="Loading assets" />}
+
+          {status === 'error' && !snapshot && (
+            <InlineError
+              title="Assets unavailable"
+              message={error ?? 'We could not reach the wallet service.'}
+              onRetry={refresh}
+            />
+          )}
+
+          {snapshot && assets.length === 0 && (
+            <InlineEmpty
+              title="No assets yet"
+              description="Fund this wallet or receive a payment to see balances here."
+              action={
+                <Link href="/receive">
+                  <Button variant="outline">
+                    <ArrowDownLeft className="mr-2 h-4 w-4" />
+                    Receive funds
+                  </Button>
+                </Link>
+              }
+            />
+          )}
+
+          {groups.length > 0 && (
+            <div className="space-y-8">
+              {groups.map((group) => (
+                <section key={group.category} aria-labelledby={`asset-group-${group.category}`}>
+                  <div className="flex items-baseline justify-between mb-3">
+                    <div>
+                      <h3
+                        id={`asset-group-${group.category}`}
+                        className="text-sm font-semibold uppercase tracking-wide text-foreground"
+                      >
+                        {group.label}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">{group.description}</p>
+                    </div>
+                    <p className="text-sm font-semibold text-primary">
+                      ${group.totalValue.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {group.assets.map((asset) => (
+                      <WalletCard key={`${asset.code}-${asset.issuer}`} asset={asset} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {mockAssets.map((asset) => (
-              <AssetCard key={asset.code} {...asset} />
-            ))}
-          </div>
+          )}
         </div>
 
         {/* Recent Transactions */}
@@ -142,11 +212,18 @@ export function DashboardPage() {
               <Button variant="ghost">View All</Button>
             </Link>
           </div>
-          <div className="bg-card rounded-xl border border-border divide-y divide-border overflow-hidden">
-            {mockTransactions.map((tx) => (
-              <TransactionRow key={tx.id} {...tx} />
-            ))}
-          </div>
+          {mockTransactions.length === 0 ? (
+            <InlineEmpty
+              title="No transactions yet"
+              description="Payments you send or receive will appear here."
+            />
+          ) : (
+            <div className="bg-card rounded-xl border border-border divide-y divide-border overflow-hidden">
+              {mockTransactions.map((tx) => (
+                <TransactionRow key={tx.id} {...tx} />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Quick Stats */}
@@ -171,4 +248,3 @@ export function DashboardPage() {
     </div>
   )
 }
-

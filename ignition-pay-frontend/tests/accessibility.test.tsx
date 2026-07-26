@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 import { axe, toHaveNoViolations } from 'jest-axe';
 import { expect, test } from 'vitest';
-import ThemeToggle from '../components/theme-toggle';
+import { ThemeToggle } from '../components/theme-toggle';
 
 expect.extend(toHaveNoViolations);
 

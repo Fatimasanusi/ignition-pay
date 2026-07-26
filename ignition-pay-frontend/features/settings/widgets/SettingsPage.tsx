@@ -7,12 +7,12 @@ import {
   User,
   Eye,
   EyeOff,
-  Zap,
   Shield,
   LogOut,
   Copy,
   ArrowUpRight,
   BarChart3,
+  Palette,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,8 @@ import { APP_VERSION } from '@/lib/version'
 import { useAnalyticsConsent } from '@/hooks/use-consent'
 import { usePreferences } from '../state'
 import { updateProfile } from '../services'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { useTheme } from '@/hooks/use-theme'
 
 export function SettingsPage() {
   const [showSeed, setShowSeed] = useState(false)
@@ -34,6 +36,7 @@ export function SettingsPage() {
   })
   const { consented, setConsented } = useAnalyticsConsent()
   const { preferences, save, saving } = usePreferences()
+  const { mode } = useTheme()
 
   const mockSeedPhrase =
     'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -320,7 +323,7 @@ export function SettingsPage() {
         <div className="bg-card rounded-xl border border-border p-8 space-y-6">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
-              <Zap size={20} className="text-purple-500" />
+              <Palette size={20} className="text-purple-500" />
             </div>
             <h2 className="text-xl font-bold text-foreground">Preferences</h2>
           </div>
@@ -348,13 +351,11 @@ export function SettingsPage() {
             <div className="flex items-center justify-between py-4 border-b border-border">
               <div>
                 <p className="font-semibold text-foreground">Theme</p>
-                <p className="text-sm text-muted-foreground">Dark Mode</p>
+                <p className="text-sm text-muted-foreground">
+                  {mode === 'system' ? 'Follows your system preference' : mode === 'dark' ? 'Dark mode enabled' : 'Light mode enabled'}
+                </p>
               </div>
-              <select className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary">
-                <option>Dark</option>
-                <option>Light</option>
-                <option>Auto</option>
-              </select>
+              <ThemeToggle />
             </div>
 
             <div className="flex items-center justify-between py-4">
