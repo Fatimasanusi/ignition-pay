@@ -110,5 +110,9 @@ class KeyPair {
   /// ```
   void zeroize() {
     _secretKey.fillRange(0, _secretKey.length, 0);
+    final data = [0x30, ...publicKey];
+    final checksum = StrKeyUtil.calculateChecksum(Uint8List.fromList(data));
+    final finalData = [...data, checksum & 0xFF, (checksum >> 8) & 0xFF];
+    return 'G${StrKeyUtil.encodeBase32(Uint8List.fromList(finalData))}';
   }
 }

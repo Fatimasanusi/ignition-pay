@@ -207,7 +207,7 @@ String encodeStellarSeed(List<int> seedBytes) {
     throw ArgumentError('Seed must be exactly 32 bytes');
   }
   final data = [0xC0, ...seedBytes];
-  final checksum = StrKeyUtil.calculateChecksum(data);
+  final checksum = StrKeyUtil.calculateChecksum(Uint8List.fromList(data));
   final finalData = [...data, checksum & 0xFF, (checksum >> 8) & 0xFF];
   return 'S${StrKeyUtil.encodeBase32(Uint8List.fromList(finalData))}';
 }
