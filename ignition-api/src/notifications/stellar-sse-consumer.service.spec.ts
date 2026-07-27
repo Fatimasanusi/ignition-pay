@@ -23,6 +23,7 @@ const mockCache = {
 };
 
 const mockPrisma = {
+  $transaction: jest.fn((callback) => callback(mockPrisma)),
   wallet: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -133,6 +134,14 @@ describe('StellarSseConsumerService', () => {
           donations: [],
         },
       ]);
+      mockPrisma.campaign.update.mockResolvedValue({
+        id: 'c1',
+        title: 'Test Campaign',
+        goalAmount: 1000,
+        raisedAmount: 50,
+        milestones: [],
+        status: 'ACTIVE',
+      });
 
       await (service as any).dispatchDomainEvents(address, record);
 
@@ -156,6 +165,16 @@ describe('StellarSseConsumerService', () => {
           donations: [], // 0 existing; amount from record = 50 => reaches target
         },
       ]);
+      mockPrisma.campaign.update.mockResolvedValue({
+        id: 'c1',
+        title: 'Test Campaign',
+        goalAmount: 1000,
+        raisedAmount: 50,
+        milestones: [
+          { id: 'm1', title: 'First milestone', targetAmount: 50, status: 'ACTIVE' },
+        ],
+        status: 'ACTIVE',
+      });
       mockPrisma.milestone.update.mockResolvedValue({});
 
       await (service as any).dispatchDomainEvents(address, record);
@@ -184,6 +203,16 @@ describe('StellarSseConsumerService', () => {
           donations: [], // 0 existing; amount = 50 → not reached
         },
       ]);
+      mockPrisma.campaign.update.mockResolvedValue({
+        id: 'c1',
+        title: 'Test Campaign',
+        goalAmount: 1000,
+        raisedAmount: 50,
+        milestones: [
+          { id: 'm1', title: 'Big milestone', targetAmount: 500, status: 'ACTIVE' },
+        ],
+        status: 'ACTIVE',
+      });
 
       await (service as any).dispatchDomainEvents(address, record);
 
@@ -204,7 +233,14 @@ describe('StellarSseConsumerService', () => {
           donations: [],
         },
       ]);
-      mockPrisma.campaign.update.mockResolvedValue({});
+      mockPrisma.campaign.update.mockResolvedValue({
+        id: 'c1',
+        title: 'Goal Campaign',
+        goalAmount: 50,
+        raisedAmount: 50,
+        milestones: [],
+        status: 'ACTIVE',
+      });
 
       await (service as any).dispatchDomainEvents(address, record);
 
