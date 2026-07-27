@@ -33,12 +33,17 @@ interface PasswordHistoryRecord {
 interface PrismaMock {
   user: {
     findFirst: jest.Mock;
+    findUnique: jest.Mock;
     update: jest.Mock;
+    create: jest.Mock;
   };
   passwordHistory: {
     findMany: jest.Mock<Promise<PasswordHistoryRecord[]>, []>;
     create: jest.Mock;
     deleteMany: jest.Mock;
+  };
+  emailVerificationToken: {
+    create: jest.Mock;
   };
   $transaction: jest.Mock<
     Promise<unknown>,
@@ -67,13 +72,17 @@ describe('UsersService password security', () => {
     prisma = {
       user: {
         findFirst: jest.fn(),
-        update: jest.fn(),
         findUnique: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
       },
       passwordHistory: {
         findMany: jest.fn<Promise<PasswordHistoryRecord[]>, []>(),
         create: jest.fn(),
         deleteMany: jest.fn(),
+      },
+      emailVerificationToken: {
+        create: jest.fn(),
       },
       $transaction: jest.fn((callback) => callback(prisma)),
     };
@@ -231,6 +240,48 @@ describe('UsersService password security', () => {
       where: {
         id: { in: ['delete-1'] },
       },
+    });
+  });
+
+  it('rejects setup when the new password matches a recent history entry', async () => {
+    prisma.user.findFirst.mockResolvedValue(baseUser);
+    prisma.passwordHistory.findMany.mockResolvedValue([
+      { id: 'history-1', passwordHash: 'hash:old-1' },
+      { id: 'history-2', passwordHash: 'hash:old-2' },
+    ]);
+    bcryptMock.compare
+      .mockResolvedValueOnce(false as never)
+      .mockResolvedValueOnce(true as never);
+
+    await expect(
+      service.setupPassword({
+        userId: baseUser.id,
+        password: 'ReuseOldPassw0rd!',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(bcryptMock.hash).not.toHaveBeenCalled();
+  });
+
+  it('creates password history entry during registration', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({ id: 'new-user-1' } as any);
+    prisma.passwordHistory.create.mockResolvedValue({} as any);
+    prisma.emailVerificationToken.create.mockResolvedValue({} as any);
+
+    const result = await service.register(
+      'newuser@example.com',
+      'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5KABCDEF',
+      'ValidPassw0rd!',
+    );
+
+    expect(prisma.passwordHistory.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'new-user-1',
+        passwordHash: 'hash:new-password',
+      },
+    });
+    expect(result).toEqual({
+      message: 'Registration successful. Please confirm your email.',
     });
   });
 });
