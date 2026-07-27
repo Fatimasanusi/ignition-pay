@@ -51,7 +51,7 @@ class KeyPair {
   /// Encodes the public key as a Stellar G... address.
   String get publicKeyAddress {
     final data = [0x30, ...publicKey];
-    final checksum = StrKeyUtil.calculateChecksum(data);
+    final checksum = StrKeyUtil.calculateChecksum(Uint8List.fromList(data));
     final finalData = [...data, checksum & 0xFF, (checksum >> 8) & 0xFF];
     return 'G${StrKeyUtil.encodeBase32(Uint8List.fromList(finalData))}';
   }
