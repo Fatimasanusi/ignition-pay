@@ -1,3 +1,4 @@
+import 'dart:convert';
 import '../address/detect.dart';
 import '../address/codes.dart';
 import 'transaction.dart';
@@ -73,7 +74,8 @@ class TransactionBuilder {
     if (text.isEmpty) {
       _errors.add('Memo text cannot be empty');
     }
-    if (text.length > 28) {
+    final byteLength = utf8.encode(text).length;
+    if (byteLength > 28) {
       _errors.add('Memo text must be 28 bytes or less');
     }
     _memoType = 'text';
