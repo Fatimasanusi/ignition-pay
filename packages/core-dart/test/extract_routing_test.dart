@@ -71,12 +71,19 @@ void main() {
       expect(result.destinationError, isNull);
     });
 
-    test('throws ExtractRoutingException for C-addresses', () {
+    test('returns INVALID_DESTINATION warning for C-addresses', () {
       const cAddress = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
-      expect(
-        () => extractRouting(RoutingInput(destination: cAddress, memoType: 'none')),
-        throwsA(isA<ExtractRoutingException>()),
+      final result = extractRouting(
+        RoutingInput(destination: cAddress, memoType: 'none'),
       );
+
+      expect(result.source, RoutingSource.none);
+      expect(result.destinationBaseAccount, isNull);
+      expect(result.id, isNull);
+      expect(result.destinationError, isNull);
+      expect(result.warnings, hasLength(1));
+      expect(result.warnings.first.code, 'INVALID_DESTINATION');
+      expect(result.warnings.first.severity, 'error');
     });
 
     test('throws ExtractRoutingException for empty destination', () {

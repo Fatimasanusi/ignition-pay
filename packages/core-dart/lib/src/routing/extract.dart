@@ -14,9 +14,9 @@ RoutingResult extractRouting(RoutingInput input) {
   }
 
   final prefix = trimmed[0].toUpperCase();
-  if (prefix != 'G' && prefix != 'M') {
+  if (prefix != 'G' && prefix != 'M' && prefix != 'C') {
     throw ExtractRoutingException(
-      'Invalid destination: expected a G or M address, got "${input.destination}".',
+      'Invalid destination: expected a G, M, or C address, got "${input.destination}".',
     );
   }
 
@@ -35,6 +35,25 @@ RoutingResult extractRouting(RoutingInput input) {
   }
 
   final parsed = parse(input.destination);
+
+  if (parsed.kind == codes.AddressKind.c) {
+    final warnings = <RoutingWarning>[
+      ...parsed.warnings.map((w) => RoutingWarning(
+            code: w.code,
+            severity: w.severity,
+            message: w.message,
+          )),
+      const RoutingWarning(
+        code: codes.WarningCode.invalidDestination,
+        severity: 'error',
+        message: 'C address is not a valid destination',
+      ),
+    ];
+    return RoutingResult(
+      source: RoutingSource.none,
+      warnings: warnings,
+    );
+  }
 
   if (parsed.kind == null) {
     return RoutingResult(
