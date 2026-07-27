@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import '../util/strkey.dart';
+import 'crypto_utils.dart';
 
 /// Represents an Ed25519 key pair for Stellar.
 ///
@@ -114,5 +115,21 @@ class KeyPair {
     final checksum = StrKeyUtil.calculateChecksum(Uint8List.fromList(data));
     final finalData = [...data, checksum & 0xFF, (checksum >> 8) & 0xFF];
     return 'G${StrKeyUtil.encodeBase32(Uint8List.fromList(finalData))}';
+  }
+
+  /// Signs [message] using this key pair's secret key via Ed25519.
+  ///
+  /// Delegates to [signEd25519] in `crypto_utils.dart`, making the keypair
+  /// usable end-to-end without exposing the raw [signEd25519] helper:
+  ///
+  /// ```dart
+  /// final sig = keypair.sign(transactionHash);
+  /// print(sig.signatureHex); // hex-encoded 64-byte signature
+  /// ```
+  ///
+  /// Returns a [SignatureResult] containing the 64-byte signature, the
+  /// public key bytes, and the algorithm identifier.
+  SignatureResult sign(List<int> message) {
+    return signEd25519(message, this);
   }
 }
