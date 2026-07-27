@@ -40,6 +40,7 @@ export interface PaymentJobPayload {
   recipientAddress: string;
   amount: string;
   assetCode: string;
+}
 // ---------------------------------------------------------------------------
 // Horizon polling worker — Issue #243
 // ---------------------------------------------------------------------------
@@ -53,6 +54,7 @@ export interface HorizonCheckTxPayload {
   transactionId: string;
   /** Stellar transaction hash already recorded, or the account to watch */
   stellarTxHash?: string;
+}
 // Milestone notifications
 // ---------------------------------------------------------------------------
 
