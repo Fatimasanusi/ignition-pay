@@ -311,7 +311,6 @@ export class StellarSseConsumerService
       },
       include: {
         milestones: { where: { status: 'ACTIVE' } },
-        donations: { where: { status: 'CONFIRMED' } },
       },
     });
 
@@ -325,43 +324,72 @@ export class StellarSseConsumerService
         relatedId: campaign.id,
       });
 
-      const totalRaised = campaign.donations.reduce(
-        (sum, d) => sum + Number(d.amount),
-        0,
-      ) + amount;
+      // Execute database modifications inside a transaction for atomicity and thread-safety
+      const { updatedCampaign, completedMilestoneIds, campaignCompleted } = await this.prisma.$transaction(async (tx) => {
+        // 1. Atomically increment the campaign's raisedAmount
+        const currentCampaign = await tx.campaign.update({
+          where: { id: campaign.id },
+          data: {
+            raisedAmount: {
+              increment: amount,
+            },
+          },
+          include: {
+            milestones: { where: { status: 'ACTIVE' } },
+          },
+        });
+
+        const newRaisedAmount = Number(currentCampaign.raisedAmount);
+
+        // 2. Identify and complete qualifying milestones
+        const completedMilestoneIds: string[] = [];
+        for (const milestone of currentCampaign.milestones) {
+          if (newRaisedAmount >= Number(milestone.targetAmount)) {
+            await tx.milestone.update({
+              where: { id: milestone.id },
+              data: { status: 'COMPLETED', completedAt: new Date() },
+            });
+            completedMilestoneIds.push(milestone.id);
+          }
+        }
+
+        // 3. Complete the campaign if the goal has been met
+        let campaignCompleted = false;
+        if (newRaisedAmount >= Number(currentCampaign.goalAmount) && currentCampaign.status !== 'COMPLETED') {
+          await tx.campaign.update({
+            where: { id: campaign.id },
+            data: { status: 'COMPLETED' },
+          });
+          campaignCompleted = true;
+        }
+
+        return {
+          updatedCampaign: currentCampaign,
+          completedMilestoneIds,
+          campaignCompleted,
+        };
+      });
 
       // ── MILESTONE_REACHED ──────────────────────────────────────────────
-      for (const milestone of campaign.milestones) {
-        if (totalRaised >= Number(milestone.targetAmount)) {
-          await this.notifications.create({
-            userId: wallet.userId,
-            type: NotificationType.MILESTONE_REACHED,
-            title: 'Milestone reached',
-            message: `Milestone "${milestone.title}" in campaign "${campaign.title}" has been reached!`,
-            relatedId: milestone.id,
-          });
-
-          // Mark the milestone as completed
-          await this.prisma.milestone.update({
-            where: { id: milestone.id },
-            data: { status: 'COMPLETED', completedAt: new Date() },
-          });
-        }
+      for (const milestoneId of completedMilestoneIds) {
+        const milestone = campaign.milestones.find((m) => m.id === milestoneId);
+        await this.notifications.create({
+          userId: wallet.userId,
+          type: NotificationType.MILESTONE_REACHED,
+          title: 'Milestone reached',
+          message: `Milestone "${milestone?.title ?? ''}" in campaign "${campaign.title}" has been reached!`,
+          relatedId: milestoneId,
+        });
       }
 
       // ── CAMPAIGN_COMPLETED ─────────────────────────────────────────────
-      if (totalRaised >= Number(campaign.goalAmount)) {
+      if (campaignCompleted) {
         await this.notifications.create({
           userId: wallet.userId,
           type: NotificationType.CAMPAIGN_COMPLETED,
           title: 'Campaign completed',
           message: `Your campaign "${campaign.title}" has reached its funding goal!`,
           relatedId: campaign.id,
-        });
-
-        await this.prisma.campaign.update({
-          where: { id: campaign.id },
-          data: { status: 'COMPLETED' },
         });
       }
     }
