@@ -31,6 +31,8 @@ void main() {
       expect(result.destinationBaseAccount, baseG);
       expect(result.id, BigInt.from(42));
       expect(result.source, RoutingSource.memo);
+      expect(result.memoType, 'id');
+      expect(result.memoValue, '42');
       expect(result.destinationError, isNull);
       expect(result.warnings, hasLength(1));
       expect(result.warnings.first.code, 'memo-ignored');
@@ -48,6 +50,8 @@ void main() {
       expect(result.destinationBaseAccount, baseG);
       expect(result.id, isNull);
       expect(result.source, RoutingSource.none);
+      expect(result.memoType, 'text');
+      expect(result.memoValue, 'not-a-routing-id');
       expect(result.destinationError, isNull);
       expect(
         result.warnings.map((warning) => warning.code),
@@ -67,6 +71,8 @@ void main() {
       expect(result.destinationBaseAccount, baseG);
       expect(result.id, BigInt.from(100));
       expect(result.source, RoutingSource.memo);
+      expect(result.memoType, 'id');
+      expect(result.memoValue, '100');
       expect(result.warnings, isEmpty);
       expect(result.destinationError, isNull);
     });
