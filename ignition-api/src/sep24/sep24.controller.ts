@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Param,
+  Query,
   UseGuards,
   Request,
 } from '@nestjs/common'
@@ -18,10 +19,12 @@ import { Sep24Service } from './sep24.service'
 import {
   InitiateSep24Dto,
   Sep24StatusDto,
+  GetSep24HistoryQueryDto,
 } from './dto/initiate-sep24.dto'
 import {
   InitiateSep24ResponseDto,
   Sep24TransactionStatusResponseDto,
+  Sep24HistoryResponseDto,
 } from './dto/sep24-response.dto'
 import { Throttle } from '@nestjs/throttler'
 
@@ -79,5 +82,20 @@ export class Sep24Controller {
     @Param('id') id: string,
   ): Promise<Sep24TransactionStatusResponseDto> {
     return this.sep24Service.getStatus(id)
+  }
+
+  @Get('history')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({ summary: 'Get the authenticated user\'s SEP-24 anchor transaction history' })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated list of anchor deposits and withdrawals',
+    type: Sep24HistoryResponseDto,
+  })
+  async getHistory(
+    @Query() query: GetSep24HistoryQueryDto,
+    @Request() req: any,
+  ): Promise<Sep24HistoryResponseDto> {
+    return this.sep24Service.getHistory(req.user.sub, query)
   }
 }

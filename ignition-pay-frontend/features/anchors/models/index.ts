@@ -78,3 +78,37 @@ export interface Sep24WizardState {
   error: string | null
   isSubmitting: boolean
 }
+
+// ---------------------------------------------------------------------------
+// Anchor History
+// ---------------------------------------------------------------------------
+
+export interface AnchorHistoryItem {
+  id: string
+  anchorName: string
+  operation: 'deposit' | 'withdraw'
+  assetCode: string
+  assetIssuer?: string
+  amount?: string
+  status: string
+  statusDesc?: string
+  anchorTxId?: string
+  stellarTxHash?: string
+  moreInfoUrl?: string
+  startedAt: string
+  completedAt?: string
+}
+
+export interface AnchorHistoryResponse {
+  items: AnchorHistoryItem[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface AnchorHistoryQuery {
+  page?: number
+  limit?: number
+  operation?: 'deposit' | 'withdraw'
+  anchorName?: string
+}

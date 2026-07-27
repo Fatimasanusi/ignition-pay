@@ -60,6 +60,7 @@ export const API_ENDPOINTS = {
     initiate: '/sep24/initiate',
     status: '/sep24/status',
     transaction: (id: string) => `/sep24/transactions/${id}`,
+    history: '/sep24/history',
   },
   health: {
     root: '/health',
