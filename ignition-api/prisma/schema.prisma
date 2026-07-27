@@ -480,6 +480,35 @@ model Transaction {
   @@map("transactions")
 }
 
+/// SEP-24 transaction model for tracking interactive deposit/withdraw flows
+model Sep24Transaction {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  walletId        String?   @map("wallet_id")
+  anchorName      String    @map("anchor_name")
+  operation       String    // "deposit" | "withdraw"
+  stellarAccount  String    @map("stellar_account")
+  assetCode       String    @map("asset_code")
+  assetIssuer     String?   @map("asset_issuer")
+  amount          Decimal?  @db.Decimal(20, 7)
+  anchorTxId      String?   @map("anchor_tx_id")
+  interactiveUrl  String?   @map("interactive_url")
+  status          String    @default("incomplete")
+  statusDesc      String?   @map("status_desc")
+  stellarTxHash   String?   @map("stellar_tx_hash")
+  moreInfoUrl     String?   @map("more_info_url")
+  message         String?
+  rawAnchorResponse Json?   @map("raw_anchor_response")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([anchorTxId])
+  @@index([status])
+  @@map("sep24_transactions")
+}
+
 /// Address model for deposit address management with allocation tracking
 model Address {
   id             String        @id @default(uuid())
