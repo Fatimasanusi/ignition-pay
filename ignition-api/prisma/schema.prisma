@@ -187,16 +187,19 @@ model ApiKey {
   expiresAt      DateTime?
   lastUsedAt     DateTime?
   warningSentAt  DateTime?
+  rotationOfId   String?   /// If set, this key is the old key being rotated; it remains active during the grace period
+  rotationExpiresAt DateTime? /// When the rotation grace period ends; after this, the old key is auto-revoked
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([prefix, isActive])
   @@index([userId])
   @@index([isActive, expiresAt])
+  @@index([isActive, rotationExpiresAt])
   // Covering index for the guard's findUnique(keyHash, isActive) lookup
   @@index([keyHash, isActive])
+  @@index([rotationOfId])
   @@map("api_keys")
 }
 
