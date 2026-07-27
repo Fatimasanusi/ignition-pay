@@ -131,6 +131,8 @@ final class RoutingResult {
   final List<RoutingWarning> warnings;
   final String? destinationBaseAccount;
   final DestinationError? destinationError;
+  final String? memoType;
+  final String? memoValue;
 
   RoutingResult({
     required this.source,
@@ -138,6 +140,8 @@ final class RoutingResult {
     List<RoutingWarning>? warnings,
     this.destinationBaseAccount,
     this.destinationError,
+    this.memoType,
+    this.memoValue,
   }) : warnings = List.unmodifiable(warnings ?? const []);
 
   Map<String, dynamic> toJson() => {
@@ -148,6 +152,8 @@ final class RoutingResult {
           'destinationBaseAccount': destinationBaseAccount,
         if (destinationError != null)
           'destinationError': destinationError!.toJson(),
+        if (memoType != null) 'memoType': memoType,
+        if (memoValue != null) 'memoValue': memoValue,
       };
 
   factory RoutingResult.fromJson(Map<String, dynamic> json) {
@@ -167,6 +173,8 @@ final class RoutingResult {
           ? DestinationError.fromJson(
               json['destinationError'] as Map<String, dynamic>)
           : null,
+      memoType: json['memoType'] as String?,
+      memoValue: json['memoValue'] as String?,
     );
   }
 
@@ -178,7 +186,8 @@ final class RoutingResult {
         return 'Muxed routing: ID $idStr -> $base';
       case RoutingSource.memo:
         final idStr = id?.toString() ?? 'unknown';
-        return 'Memo routing: ID $idStr';
+        final memo = memoType != null ? ' (memoType: $memoType, memoValue: $memoValue)' : '';
+        return 'Memo routing: ID $idStr$memo';
       case RoutingSource.none:
         return 'No routing detected';
     }
@@ -186,7 +195,7 @@ final class RoutingResult {
 
   @override
   String toString() =>
-      'RoutingResult(source: $source, id: $id, warnings: $warnings, destinationBaseAccount: $destinationBaseAccount, destinationError: $destinationError)';
+      'RoutingResult(source: $source, id: $id, warnings: $warnings, destinationBaseAccount: $destinationBaseAccount, destinationError: $destinationError, memoType: $memoType, memoValue: $memoValue)';
 
   @override
   bool operator ==(Object other) =>
@@ -196,11 +205,13 @@ final class RoutingResult {
           id == other.id &&
           destinationBaseAccount == other.destinationBaseAccount &&
           destinationError?.code == other.destinationError?.code &&
+          memoType == other.memoType &&
+          memoValue == other.memoValue &&
           _listEquals(warnings, other.warnings);
 
   @override
   int get hashCode => Object.hash(source, id, destinationBaseAccount,
-      destinationError?.code, Object.hashAll(warnings));
+      destinationError?.code, memoType, memoValue, Object.hashAll(warnings));
 
   static bool _listEquals(List<RoutingWarning> a, List<RoutingWarning> b) {
     if (a.length != b.length) return false;

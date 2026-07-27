@@ -141,18 +141,24 @@ RoutingResult extractRouting(RoutingInput input) {
       destinationBaseAccount: baseG,
       id: routingId,
       source: routingSource,
+      memoType: input.memoType,
+      memoValue: input.memoValue,
       warnings: warnings,
     );
   }
 
   BigInt? routingId;
   RoutingSource routingSource = RoutingSource.none;
+  String? resultMemoType;
+  String? resultMemoValue;
 
   if (input.memoType == 'id') {
     final norm = normalizeMemoId(input.memoValue ?? '');
     if (norm.normalized != null) {
       routingId = BigInt.parse(norm.normalized!);
       routingSource = RoutingSource.memo;
+      resultMemoType = input.memoType;
+      resultMemoValue = input.memoValue;
     } else {
       warnings.add(
         const RoutingWarning(
@@ -174,6 +180,8 @@ RoutingResult extractRouting(RoutingInput input) {
     if (norm.normalized != null) {
       routingId = BigInt.parse(norm.normalized!);
       routingSource = RoutingSource.memo;
+      resultMemoType = input.memoType;
+      resultMemoValue = input.memoValue;
     } else {
       warnings.add(
         const RoutingWarning(
@@ -212,6 +220,8 @@ RoutingResult extractRouting(RoutingInput input) {
     destinationBaseAccount: parsed.address,
     id: routingId,
     source: routingSource,
+    memoType: resultMemoType,
+    memoValue: resultMemoValue,
     warnings: warnings,
   );
 }

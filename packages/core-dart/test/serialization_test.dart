@@ -88,10 +88,12 @@ void main() {
       expect(restored.destinationBaseAccount, result.destinationBaseAccount);
     });
 
-    test('memo source round-trip with warnings', () {
+    test('memo source round-trip with warnings and memo fields', () {
       final result = RoutingResult(
         source: RoutingSource.memo,
         id: BigInt.from(100),
+        memoType: 'id',
+        memoValue: '100',
         warnings: [
           const RoutingWarning(
               code: 'test', severity: 'warn', message: 'Test warning'),
@@ -100,12 +102,16 @@ void main() {
       final json = result.toJson();
       expect(json['source'], 'memo');
       expect(json['id'], '100');
+      expect(json['memoType'], 'id');
+      expect(json['memoValue'], '100');
       expect(json['warnings'], hasLength(1));
       expect(json['warnings'][0]['code'], 'test');
 
       final restored = RoutingResult.fromJson(json);
       expect(restored.source, result.source);
       expect(restored.id, result.id);
+      expect(restored.memoType, result.memoType);
+      expect(restored.memoValue, result.memoValue);
       expect(restored.warnings, hasLength(1));
       expect(restored.warnings.first.code, 'test');
     });
