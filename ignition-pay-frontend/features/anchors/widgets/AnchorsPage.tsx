@@ -3,6 +3,8 @@
 import { ArrowUpRight, ArrowDownLeft, Lock } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import Sep24Wizard from './Sep24Wizard'
+import { useSep24Wizard } from '@/features/anchors/state'
 
 const statusStyles = {
   Online: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
@@ -72,6 +74,7 @@ const anchors = [
 ]
 
 export default function AnchorsPage() {
+  const wizard = useSep24Wizard()
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b border-border bg-card/50 backdrop-blur-sm">
@@ -173,11 +176,18 @@ export default function AnchorsPage() {
                 </div>
 
                 <div className="flex gap-3 pt-4">
-                  <Button variant="outline" className="flex-1">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => wizard.open(anchor.name, 'deposit')}
+                  >
                     <ArrowDownLeft className="mr-2 h-4 w-4" />
                     Deposit
                   </Button>
-                  <Button className="flex-1 bg-primary hover:bg-primary/90">
+                  <Button
+                    className="flex-1 bg-primary hover:bg-primary/90"
+                    onClick={() => wizard.open(anchor.name, 'withdraw')}
+                  >
                     <ArrowUpRight className="mr-2 h-4 w-4" />
                     Withdraw
                   </Button>
@@ -241,7 +251,11 @@ export default function AnchorsPage() {
                     <Button variant="outline" size="sm">
                       Details
                     </Button>
-                    <Button size="sm" className="bg-primary hover:bg-primary/90">
+                    <Button
+                      size="sm"
+                      className="bg-primary hover:bg-primary/90"
+                      onClick={() => wizard.open(anchor.name)}
+                    >
                       Connect
                     </Button>
                   </div>
@@ -283,6 +297,17 @@ export default function AnchorsPage() {
           </div>
         </div>
       </div>
+
+      <Sep24Wizard
+        state={wizard.state}
+        onClose={wizard.close}
+        onSetOperation={wizard.setOperation}
+        onSetAssetCode={wizard.setAssetCode}
+        onSetAssetIssuer={wizard.setAssetIssuer}
+        onSetAmount={wizard.setAmount}
+        onSubmit={wizard.submit}
+        onReset={wizard.reset}
+      />
     </div>
   )
 }

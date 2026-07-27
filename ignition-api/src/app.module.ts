@@ -32,6 +32,7 @@ import { SentryMiddleware } from './common/sentry/sentry.middleware';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
 import { NotificationsModule } from './notifications/notifications.module';
+import { Sep24Module } from './sep24/sep24.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     AddressesModule,
     AnalyticsModule,
     NotificationsModule,
+    Sep24Module,
   ],
   controllers: [AppController],
   providers: [
