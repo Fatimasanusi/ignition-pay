@@ -33,8 +33,9 @@ export const metadata: Metadata = {
 }
 
 const themeInitScript = `
-(function() {
+(function(){
   try {
+    var root = document.documentElement;
     var stored = localStorage.getItem('theme');
     var mode = stored || 'system';
     var resolved;
@@ -43,9 +44,14 @@ const themeInitScript = `
     } else {
       resolved = mode;
     }
-    var root = document.documentElement;
     root.classList.toggle('dark', resolved === 'dark');
-  } catch (e) {}
+    root.style.colorScheme = resolved;
+
+    var contrastStored = localStorage.getItem('contrast');
+    if (contrastStored === 'high') {
+      root.classList.add('high-contrast');
+    }
+  } catch(e) {}
 })();
 `
 
