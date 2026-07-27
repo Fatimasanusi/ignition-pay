@@ -4,20 +4,24 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Wallet, Send, ArrowDownUp, History, Anchor, Settings, Menu, X } from 'lucide-react'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+
+const navItems = [
+  { href: '/dashboard', label: 'Dashboard', icon: Wallet },
+  { href: '/send', label: 'Send', icon: Send },
+  { href: '/receive', label: 'Receive', icon: ArrowDownUp },
+  { href: '/history', label: 'History', icon: History },
+  { href: '/anchors', label: 'Anchors', icon: Anchor },
+  { href: '/settings', label: 'Settings', icon: Settings },
+]
+
+/** The four primary destinations, surfaced as a bottom tab bar on mobile. */
+const bottomTabs = navItems.filter((item) =>
+  ['/dashboard', '/send', '/receive', '/history'].includes(item.href),
+)
 
 export function Navigation() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
-
-  const navItems = [
-    { href: '/dashboard', label: 'Dashboard', icon: Wallet },
-    { href: '/send', label: 'Send', icon: Send },
-    { href: '/receive', label: 'Receive', icon: ArrowDownUp },
-    { href: '/history', label: 'History', icon: History },
-    { href: '/anchors', label: 'Anchors', icon: Anchor },
-    { href: '/settings', label: 'Settings', icon: Settings },
-  ]
 
   return (
     <>
@@ -59,6 +63,33 @@ export function Navigation() {
             })}
           </div>
         )}
+      </nav>
+
+      {/* Mobile Bottom Tabs */}
+      <nav
+        aria-label="Primary"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border pb-[env(safe-area-inset-bottom)]"
+      >
+        <ul className="grid grid-cols-4">
+          {bottomTabs.map((item) => {
+            const Icon = item.icon
+            const isActive = pathname === item.href
+            return (
+              <li key={item.href}>
+                <Link
+                  href={item.href}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex flex-col items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors ${
+                    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon size={20} aria-hidden="true" />
+                  {item.label}
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
       </nav>
 
       {/* Desktop Sidebar */}

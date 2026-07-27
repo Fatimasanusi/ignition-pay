@@ -11,7 +11,21 @@ import {
   storeContrast,
 } from '@/lib/theme'
 
+function getInitialTheme(): ThemeMode {
+  if (typeof window === 'undefined') return 'system'
+  return getStoredTheme()
+}
+
 export function useTheme() {
+  const [mode, setModeState] = useState<ThemeMode>(getInitialTheme)
+
+  useEffect(() => {
+    const current = getStoredTheme()
+    setModeState(current)
+    applyTheme(current)
+
+    if (current === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const [mode, setModeState] = useState<ThemeMode>('dark')
   const [contrast, setContrastState] = useState<ContrastLevel>('normal')
   const [hydrated, setHydrated] = useState(false)
@@ -86,4 +100,6 @@ export function useTheme() {
     isHighContrast,
     hydrated,
   }
+}
+  return { mode, setMode, toggle, isDark, isLight, isSystem, hydrated }
 }
