@@ -4,8 +4,11 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import type {
   Sep24WizardState,
   Sep24Operation,
+  AnchorHistoryQuery,
+  AnchorHistoryResponse,
+  AnchorHistoryItem,
 } from '@/features/anchors/models'
-import { initiateSep24, pollSep24Status, isSep24Terminal } from '@/features/anchors/services'
+import { initiateSep24, pollSep24Status, isSep24Terminal, fetchAnchorHistory } from '@/features/anchors/services'
 import { trackEvent } from '@/lib/analytics'
 
 const POLL_INTERVAL_MS = 3000
@@ -187,4 +190,82 @@ export function useSep24Wizard() {
     submit,
     reset,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Anchor History Hook
+// ---------------------------------------------------------------------------
+
+export interface UseAnchorHistoryResult {
+  items: AnchorHistoryItem[]
+  total: number
+  page: number
+  limit: number
+  isLoading: boolean
+  error: string | null
+  query: AnchorHistoryQuery
+  setQuery: (q: AnchorHistoryQuery) => void
+  refresh: () => void
+}
+
+export function useAnchorHistory(initialQuery: AnchorHistoryQuery = {}): UseAnchorHistoryResult {
+  const [items, setItems] = useState<AnchorHistoryItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(20)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [query, setQueryState] = useState<AnchorHistoryQuery>({
+    page: 1,
+    limit: 20,
+    ...initialQuery,
+  })
+  const abortRef = useRef<AbortController | null>(null)
+  const [refreshToken, setRefreshToken] = useState(0)
+
+  const load = useCallback(async () => {
+    if (abortRef.current) {
+      abortRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const result: AnchorHistoryResponse = await fetchAnchorHistory(query, controller.signal)
+      if (!controller.signal.aborted) {
+        setItems(result.items)
+        setTotal(result.total)
+        setPage(result.page)
+        setLimit(result.limit)
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        setError(err?.message ?? 'Failed to load anchor history')
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsLoading(false)
+      }
+    }
+  }, [query, refreshToken]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    load()
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [load])
+
+  const setQuery = useCallback((q: AnchorHistoryQuery) => {
+    setQueryState((prev) => ({ ...prev, ...q }))
+  }, [])
+
+  const refresh = useCallback(() => {
+    setRefreshToken((t) => t + 1)
+  }, [])
+
+  return { items, total, page, limit, isLoading, error, query, setQuery, refresh }
 }

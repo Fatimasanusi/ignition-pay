@@ -8,6 +8,8 @@ import type {
   Sep24InitiateRequest,
   Sep24InitiateResponse,
   Sep24TransactionStatus,
+  AnchorHistoryQuery,
+  AnchorHistoryResponse,
 } from '@/features/anchors/models'
 
 function apiBaseUrl(): string {
@@ -99,4 +101,33 @@ export const SEP24_STATUS_VARIANTS: Record<string, string> = {
 
 export function isSep24Terminal(status: string): boolean {
   return ['completed', 'no_market', 'too_small', 'too_large', 'expired', 'error'].includes(status)
+}
+
+export async function fetchAnchorHistory(
+  query: AnchorHistoryQuery = {},
+  signal?: AbortSignal,
+): Promise<AnchorHistoryResponse> {
+  const params = new URLSearchParams()
+  if (query.page != null) params.set('page', String(query.page))
+  if (query.limit != null) params.set('limit', String(query.limit))
+  if (query.operation) params.set('operation', query.operation)
+  if (query.anchorName) params.set('anchorName', query.anchorName)
+
+  const qs = params.toString()
+  const url = `${apiBaseUrl()}${API_PREFIX}${API_ENDPOINTS.sep24.history}${qs ? `?${qs}` : ''}`
+  const timeout = AbortSignal.timeout(TIMEOUT.default)
+  const composed = signal ? AbortSignal.any([signal, timeout]) : timeout
+
+  const response = await fetch(url, {
+    method: 'GET',
+    signal: composed,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => 'Unknown error')
+    throw new Error(`Failed to fetch anchor history: ${errorBody}`)
+  }
+
+  return response.json()
 }

@@ -1,10 +1,13 @@
 'use client'
 
-import { ArrowUpRight, ArrowDownLeft, Lock } from 'lucide-react'
+import { ArrowUpRight, ArrowDownLeft, Lock, History, RefreshCw, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import Sep24Wizard from './Sep24Wizard'
-import { useSep24Wizard } from '@/features/anchors/state'
+import { useSep24Wizard, useAnchorHistory } from '@/features/anchors/state'
+import type { AnchorHistoryItem } from '@/features/anchors/models'
+import { SEP24_STATUS_LABELS } from '@/features/anchors/services'
 
 const statusStyles = {
   Online: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
@@ -73,8 +76,81 @@ const anchors = [
   },
 ]
 
+const HISTORY_STATUS_ICON: Record<string, typeof CheckCircle2> = {
+  completed: CheckCircle2,
+  error: XCircle,
+  expired: XCircle,
+  no_market: XCircle,
+  too_small: AlertTriangle,
+  too_large: AlertTriangle,
+}
+
+const HISTORY_STATUS_COLOR: Record<string, string> = {
+  completed: 'text-green-500',
+  error: 'text-destructive',
+  expired: 'text-destructive',
+  no_market: 'text-destructive',
+  too_small: 'text-amber-500',
+  too_large: 'text-amber-500',
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function HistoryRow({ item }: { item: AnchorHistoryItem }) {
+  const Icon = HISTORY_STATUS_ICON[item.status] ?? Clock
+  const iconColor = HISTORY_STATUS_COLOR[item.status] ?? 'text-muted-foreground'
+  const label = SEP24_STATUS_LABELS[item.status] ?? item.status
+
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-border last:border-0">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+          item.operation === 'deposit' ? 'bg-green-500/10' : 'bg-blue-500/10'
+        }`}>
+          {item.operation === 'deposit'
+            ? <ArrowDownLeft size={18} className="text-green-500" />
+            : <ArrowUpRight size={18} className="text-blue-500" />}
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-foreground capitalize">{item.operation}</span>
+            <span className="text-sm text-muted-foreground">{item.assetCode}</span>
+            <span className="text-xs text-muted-foreground">via {item.anchorName}</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Icon size={12} className={iconColor} />
+            <span className="text-xs text-muted-foreground">{label}</span>
+            {item.statusDesc && (
+              <span className="text-xs text-muted-foreground">· {item.statusDesc}</span>
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="text-right ml-4 flex-shrink-0">
+        {item.amount && (
+          <p className="text-sm font-semibold text-foreground">
+            {item.operation === 'deposit' ? '+' : '−'}{item.amount} {item.assetCode}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">{formatDate(item.startedAt)}</p>
+      </div>
+    </div>
+  )
+}
+
 export default function AnchorsPage() {
   const wizard = useSep24Wizard()
+  const history = useAnchorHistory({ page: 1, limit: 10 })
+
+  const operationFilter = history.query.operation
+  const totalPages = Math.ceil(history.total / history.limit)
+
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b border-border bg-card/50 backdrop-blur-sm">
@@ -263,6 +339,112 @@ export default function AnchorsPage() {
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Transaction History */}
+        <div className="mt-12 bg-card rounded-xl border border-border p-8 space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <History size={22} className="text-primary" />
+              <h2 className="text-2xl font-bold text-foreground">Transaction History</h2>
+              {history.total > 0 && (
+                <span className="rounded-full bg-primary/10 text-primary text-xs font-semibold px-2.5 py-1">
+                  {history.total}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Operation filter */}
+              <div className="flex rounded-lg border border-border overflow-hidden text-xs font-semibold">
+                {(['all', 'deposit', 'withdraw'] as const).map((op) => {
+                  const active = op === 'all' ? !operationFilter : operationFilter === op
+                  return (
+                    <button
+                      key={op}
+                      onClick={() =>
+                        history.setQuery({ operation: op === 'all' ? undefined : op, page: 1 })
+                      }
+                      className={`px-3 py-1.5 capitalize transition-colors ${
+                        active
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-background text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      {op}
+                    </button>
+                  )
+                })}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={history.refresh}
+                disabled={history.isLoading}
+                aria-label="Refresh history"
+              >
+                <RefreshCw size={15} className={history.isLoading ? 'animate-spin' : ''} />
+              </Button>
+            </div>
+          </div>
+
+          {history.isLoading && history.items.length === 0 && (
+            <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
+              <RefreshCw size={18} className="animate-spin" />
+              <span className="text-sm">Loading history…</span>
+            </div>
+          )}
+
+          {history.error && (
+            <div className="flex items-center gap-3 rounded-lg bg-destructive/10 border border-destructive/30 px-4 py-3 text-sm text-destructive">
+              <XCircle size={16} className="flex-shrink-0" />
+              {history.error}
+            </div>
+          )}
+
+          {!history.isLoading && !history.error && history.items.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+              <History size={40} className="opacity-30" />
+              <p className="text-sm font-medium">No anchor transactions yet</p>
+              <p className="text-xs">Your deposits and withdrawals will appear here</p>
+            </div>
+          )}
+
+          {history.items.length > 0 && (
+            <div className="divide-y divide-border -mx-2 px-2">
+              {history.items.map((item) => (
+                <HistoryRow key={item.id} item={item} />
+              ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <span className="text-xs text-muted-foreground">
+                Page {history.page} of {totalPages} · {history.total} transactions
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => history.setQuery({ page: history.page - 1 })}
+                  disabled={history.page <= 1 || history.isLoading}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft size={16} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => history.setQuery({ page: history.page + 1 })}
+                  disabled={history.page >= totalPages || history.isLoading}
+                  aria-label="Next page"
+                >
+                  <ChevronRight size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-12 bg-card rounded-xl border border-border p-8 space-y-6">

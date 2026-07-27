@@ -40,3 +40,23 @@ export class Sep24StatusDto {
   @IsString()
   id: string
 }
+
+export class GetSep24HistoryQueryDto {
+  @ApiPropertyOptional({ description: 'Page number (1-based)', example: 1 })
+  @IsOptional()
+  page?: number
+
+  @ApiPropertyOptional({ description: 'Items per page (max 100)', example: 20 })
+  @IsOptional()
+  limit?: number
+
+  @ApiPropertyOptional({ enum: Sep24Operation, description: 'Filter by operation type' })
+  @IsEnum(Sep24Operation)
+  @IsOptional()
+  operation?: Sep24Operation
+
+  @ApiPropertyOptional({ description: 'Filter by anchor name' })
+  @IsString()
+  @IsOptional()
+  anchorName?: string
+}

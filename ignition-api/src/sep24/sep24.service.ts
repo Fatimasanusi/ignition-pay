@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
-import { InitiateSep24Dto, Sep24Operation } from './dto/initiate-sep24.dto'
+import { InitiateSep24Dto, Sep24Operation, GetSep24HistoryQueryDto } from './dto/initiate-sep24.dto'
+import type { Sep24HistoryItemDto, Sep24HistoryResponseDto } from './dto/sep24-response.dto'
 
 const ANCHOR_CONFIGS: Record<string, { domain: string; sep10?: string }> = {
   StellarX: { domain: 'https://api.stellarx.com' },
@@ -209,6 +210,62 @@ export class Sep24Service {
       throw new NotFoundException('SEP-24 transaction not found')
     }
     return { anchorName: record.anchorName, anchorTxId: record.anchorTxId! }
+  }
+
+  async getHistory(
+    userId: string,
+    query: GetSep24HistoryQueryDto,
+  ): Promise<Sep24HistoryResponseDto> {
+    const page = Math.max(1, query.page ?? 1)
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20))
+    const skip = (page - 1) * limit
+
+    const where: Record<string, any> = { userId }
+    if (query.operation) where.operation = query.operation
+    if (query.anchorName) where.anchorName = query.anchorName
+
+    const [records, total] = await Promise.all([
+      this.prisma.sep24Transaction.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          anchorName: true,
+          operation: true,
+          assetCode: true,
+          assetIssuer: true,
+          amount: true,
+          status: true,
+          statusDesc: true,
+          anchorTxId: true,
+          stellarTxHash: true,
+          moreInfoUrl: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      }),
+      this.prisma.sep24Transaction.count({ where }),
+    ])
+
+    const items: Sep24HistoryItemDto[] = records.map((r) => ({
+      id: r.id,
+      anchorName: r.anchorName,
+      operation: r.operation as 'deposit' | 'withdraw',
+      assetCode: r.assetCode,
+      assetIssuer: r.assetIssuer ?? undefined,
+      amount: r.amount != null ? r.amount.toString() : undefined,
+      status: r.status,
+      statusDesc: r.statusDesc ?? undefined,
+      anchorTxId: r.anchorTxId ?? undefined,
+      stellarTxHash: r.stellarTxHash ?? undefined,
+      moreInfoUrl: r.moreInfoUrl ?? undefined,
+      startedAt: r.startedAt,
+      completedAt: r.completedAt ?? undefined,
+    }))
+
+    return { items, total, page, limit }
   }
 
   private simulateAnchorResponse(
