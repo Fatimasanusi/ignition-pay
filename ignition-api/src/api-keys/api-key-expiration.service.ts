@@ -60,13 +60,36 @@ export class ApiKeyExpirationService {
           data: { warningSentAt: now },
         });
 
-        this.logger.log(`Sent expiration warning to ${key.user.email} for API key ${key.id}`);
+        this.logger.log(
+          `Sent expiration warning to ${key.user.email} for API key ${key.id}`,
+        );
       }
     }
 
+    // Deactivate keys that have passed their rotation grace period
+    // These are old keys that were kept active during rotation but the grace period has expired
+    const rotationExpiredResult = await this.prisma.apiKey.updateMany({
+      where: {
+        isActive: true,
+        rotationOfId: { not: null },
+        rotationExpiresAt: { lte: now },
+      },
+      data: {
+        isActive: false,
+      },
+    });
+
+    if (rotationExpiredResult.count > 0) {
+      this.logger.log(
+        `Deactivated ${rotationExpiredResult.count} API key(s) with expired rotation grace period`,
+      );
+    }
+
+    // Deactivate regularly expired or stale keys
     const result = await this.prisma.apiKey.updateMany({
       where: {
         isActive: true,
+        rotationOfId: null, // Don't double-count rotation keys
         OR: [{ expiresAt: { lte: now } }, { lastUsedAt: { lte: cutoff } }],
       },
       data: {
@@ -78,7 +101,7 @@ export class ApiKeyExpirationService {
       this.logger.log(`Deactivated ${result.count} stale API key(s)`);
     }
 
-    return result.count;
+    return result.count + rotationExpiredResult.count;
   }
 
   async touchUsage(keyId: string): Promise<void> {
