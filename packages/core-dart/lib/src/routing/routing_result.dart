@@ -1,4 +1,4 @@
-enum RoutingSource {
+﻿enum RoutingSource {
   muxed,
   memo,
   none;
@@ -85,6 +85,20 @@ class DestinationError {
       message: json['message'] as String,
     );
   }
+
+  @override
+  String toString() => 'DestinationError(code: $code, message: $message)';
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DestinationError &&
+          runtimeType == other.runtimeType &&
+          code == other.code &&
+          message == other.message;
+
+  @override
+  int get hashCode => Object.hash(code, message);
 }
 
 class ExtractRoutingException implements Exception {
@@ -204,14 +218,14 @@ final class RoutingResult {
           source == other.source &&
           id == other.id &&
           destinationBaseAccount == other.destinationBaseAccount &&
-          destinationError?.code == other.destinationError?.code &&
+          destinationError == other.destinationError &&
           memoType == other.memoType &&
           memoValue == other.memoValue &&
           _listEquals(warnings, other.warnings);
 
   @override
   int get hashCode => Object.hash(source, id, destinationBaseAccount,
-      destinationError?.code, memoType, memoValue, Object.hashAll(warnings));
+      destinationError, memoType, memoValue, Object.hashAll(warnings));
 
   static bool _listEquals(List<RoutingWarning> a, List<RoutingWarning> b) {
     if (a.length != b.length) return false;
@@ -221,3 +235,7 @@ final class RoutingResult {
     return true;
   }
 }
+
+
+
+
