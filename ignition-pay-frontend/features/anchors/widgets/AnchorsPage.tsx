@@ -487,7 +487,8 @@ export default function AnchorsPage() {
         onSetAssetCode={wizard.setAssetCode}
         onSetAssetIssuer={wizard.setAssetIssuer}
         onSetAmount={wizard.setAmount}
-        onSubmit={wizard.submit}
+        onGetQuote={wizard.fetchQuoteForAmount}
+        onConfirmQuote={wizard.confirmQuote}
         onReset={wizard.reset}
       />
     </div>
