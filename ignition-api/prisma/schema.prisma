@@ -203,6 +203,24 @@ model ApiKey {
   @@map("api_keys")
 }
 
+/// SystemSettings model for global platform configuration
+/// Stores admin-configurable settings like session timeouts
+model SystemSettings {
+  id                    String   @id @default(uuid())
+  /// Access token TTL in seconds (default: 900s = 15min)
+  sessionAccessTtlSeconds Int     @default(900)
+  /// Absolute session TTL in seconds (default: 604800s = 7 days)
+  sessionTtlSeconds     Int      @default(604800)
+  /// Idle timeout in seconds - session expires if not updated within this time (default: 1800s = 30min)
+  sessionIdleTimeoutSeconds Int @default(1800)
+  /// Whether to enable session persistence (extend session on activity)
+  sessionPersistenceEnabled Boolean @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
 /// Campaign model representing fundraising campaigns
 model Campaign {
   id           String         @id @default(uuid())
