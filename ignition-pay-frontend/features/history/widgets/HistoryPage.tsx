@@ -5,9 +5,11 @@ import { Download, Search } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { TransactionRow } from '@/components/transaction-row'
+import { useOptimisticTransactions } from '@/features/history/state'
+import type { Transaction, OptimisticTransaction } from '@/features/history/models'
 
 // Mock transactions (to be replaced by real API integration)
-const mockTransactions = [
+const mockTransactions: Transaction[] = [
   {
     id: '1',
     type: 'sent' as const,
@@ -77,20 +79,31 @@ const STATUS_OPTIONS = ['all', 'confirmed', 'pending'] as const
 type StatusOption = (typeof STATUS_OPTIONS)[number]
 
 export function HistoryPage() {
+  const { optimisticEntries } = useOptimisticTransactions()
+
   const [filterType, setFilterType] = useState<'all' | 'sent' | 'received'>('all')
   const [filterAsset, setFilterAsset] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<StatusOption>('all')
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [visibleTransactions, setVisibleTransactions] = useState<typeof mockTransactions>([])
+  const [visibleTransactions, setVisibleTransactions] = useState<(Transaction | OptimisticTransaction)[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
+  /**
+   * Merges optimistic pending entries with real backend entries.
+   * Optimistic entries appear at the top (most recent first).
+   * Automatically deduplicates — once real entry arrives, optimistic is gone.
+   */
+  const mergedTransactions = useMemo(() => {
+    return [...optimisticEntries, ...mockTransactions] as (Transaction | OptimisticTransaction)[]
+  }, [optimisticEntries])
+
   const filteredTransactions = useMemo(() => {
-    return mockTransactions.filter((tx) => {
+    return mergedTransactions.filter((tx) => {
       if (filterType !== 'all' && tx.type !== filterType) return false
       if (filterAsset !== 'all' && tx.asset !== filterAsset) return false
       if (filterStatus !== 'all' && tx.status !== filterStatus) return false
@@ -110,19 +123,19 @@ export function HistoryPage() {
         const q = searchTerm.toLowerCase()
         const matchesAddress = tx.recipient.toLowerCase().includes(q)
         const matchesAsset = tx.asset.toLowerCase().includes(q)
-        // txHash: exact match (trimmed)
-        const matchesTxHash = tx.txHash?.toLowerCase() === q
+        // txHash: exact match (trimmed) — only for real transactions
+        const matchesTxHash = 'txHash' in tx && tx.txHash?.toLowerCase() === q
         if (!matchesAddress && !matchesAsset && !matchesTxHash) return false
       }
 
       return true
     })
-  }, [filterType, filterAsset, filterStatus, dateFrom, dateTo, searchTerm])
+  }, [mergedTransactions, filterType, filterAsset, filterStatus, dateFrom, dateTo, searchTerm])
 
   useEffect(() => {
     const firstPage = filteredTransactions.slice(0, PAGE_SIZE)
     setVisibleTransactions(firstPage)
-    setCursor(firstPage.at(-1)?.id ?? null)
+    setCursor(filteredTransactions[PAGE_SIZE - 1]?.id ?? null)
     setHasMore(filteredTransactions.length > firstPage.length)
     setIsLoadingMore(false)
   }, [filteredTransactions])
@@ -135,7 +148,10 @@ export function HistoryPage() {
         const [entry] = entries
 
         if (entry?.isIntersecting && !isLoadingMore) {
-          const currentIndex = filteredTransactions.findIndex((tx) => tx.id === cursor)
+          const currentIndex = filteredTransactions.findIndex((tx) => {
+            const txId = 'optimisticId' in tx ? tx.optimisticId : tx.id
+            return txId === cursor
+          })
           const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0
           const nextPage = filteredTransactions.slice(startIndex, startIndex + PAGE_SIZE)
 
@@ -146,7 +162,8 @@ export function HistoryPage() {
 
           setIsLoadingMore(true)
           setVisibleTransactions((prev) => [...prev, ...nextPage])
-          setCursor(nextPage.at(-1)?.id ?? null)
+          const lastTx = nextPage[nextPage.length - 1]
+          setCursor('optimisticId' in lastTx ? lastTx.optimisticId : lastTx.id)
           setHasMore(startIndex + nextPage.length < filteredTransactions.length)
           setIsLoadingMore(false)
         }
@@ -160,10 +177,10 @@ export function HistoryPage() {
   }, [cursor, filteredTransactions, hasMore, isLoadingMore])
 
   const stats = {
-    total: mockTransactions.length,
-    sent: mockTransactions.filter((tx) => tx.type === 'sent').length,
-    received: mockTransactions.filter((tx) => tx.type === 'received').length,
-    totalVolume: mockTransactions.reduce((acc, tx) => acc + tx.amount, 0),
+    total: mockTransactions.length + optimisticEntries.length,
+    sent: mergedTransactions.filter((tx) => tx.type === 'sent').length,
+    received: mergedTransactions.filter((tx) => tx.type === 'received').length,
+    totalVolume: mergedTransactions.reduce((acc, tx) => acc + tx.amount, 0),
   }
 
   const hasActiveFilters =
@@ -345,11 +362,14 @@ export function HistoryPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {visibleTransactions.map((tx) => (
-              <div key={tx.id}>
-                <TransactionRow {...tx} />
-              </div>
-            ))}
+            {visibleTransactions.map((tx) => {
+              const key = 'optimisticId' in tx ? tx.optimisticId : tx.id
+              return (
+                <div key={key}>
+                  <TransactionRow transaction={tx} />
+                </div>
+              )
+            })}
             {hasMore && (
               <div ref={sentinelRef} className="flex justify-center py-4 text-sm text-muted-foreground">
                 {isLoadingMore ? 'Loading more transactions…' : 'Scroll to load more'}
@@ -360,16 +380,6 @@ export function HistoryPage() {
                 You&apos;ve reached the end of the history.
               </div>
             )}
-            {filteredTransactions.map((tx) => {
-              // txHash is used for local search matching only; TransactionRow
-              // doesn't accept it as a prop so we strip it before spreading.
-              const { txHash: _txHash, ...rowProps } = tx
-              return (
-                <div key={tx.id}>
-                  <TransactionRow {...rowProps} />
-                </div>
-              )
-            })}
           </div>
         )}
       </div>
