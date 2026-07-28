@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+﻿import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import '../util/strkey.dart';
@@ -67,7 +67,7 @@ class KeyPair {
     );
   }
 
-  /// Encodes the public key as a Stellar G… address.
+  /// Encodes the public key as a Stellar Gâ€¦ address.
   ///
   /// The Stellar StrKey encoding appends a CRC-16/XMODEM checksum stored
   /// in **little-endian** order (low byte at index 0, high byte at index 1),
@@ -85,7 +85,7 @@ class KeyPair {
     payload[0] = 0x30; // G-address version byte
     payload.setRange(1, 33, publicKey);
 
-    // CRC-16/XMODEM – result is appended little-endian per Stellar StrKey spec.
+    // CRC-16/XMODEM â€“ result is appended little-endian per Stellar StrKey spec.
     final checksum = StrKeyUtil.calculateChecksum(payload);
 
     final finalData = Uint8List(35);
@@ -104,17 +104,13 @@ class KeyPair {
   /// ```dart
   /// final keypair = KeyPair.fromSeed(seed);
   /// try {
-  ///   // … use keypair …
+  ///   // â€¦ use keypair â€¦
   /// } finally {
   ///   keypair.zeroize();
   /// }
   /// ```
   void zeroize() {
     _secretKey.fillRange(0, _secretKey.length, 0);
-    final data = [0x30, ...publicKey];
-    final checksum = StrKeyUtil.calculateChecksum(Uint8List.fromList(data));
-    final finalData = [...data, checksum & 0xFF, (checksum >> 8) & 0xFF];
-    return 'G${StrKeyUtil.encodeBase32(Uint8List.fromList(finalData))}';
   }
 
   /// Signs [message] using this key pair's secret key via Ed25519.
