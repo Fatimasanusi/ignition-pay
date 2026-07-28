@@ -18,6 +18,7 @@ import {
 import { AssetAmountPicker } from '@/components/asset-amount-picker'
 import { validateAmount, type SendableAsset } from '@/features/send/models'
 import { checkTrustline, type TrustlineCheck } from '@/features/send/services'
+import { useOptimisticTransactions } from '@/features/history/state'
 
 const ADDRESS_KIND_LABELS = {
   publicKey: 'Stellar account',
@@ -41,6 +42,8 @@ const sendableAssets: SendableAsset[] = [
 ]
 
 export function SendPage() {
+  const { addOptimisticEntry, reconcileEntry, removeOptimisticEntry } = useOptimisticTransactions()
+
   const [step, setStep] = useState<'form' | 'review' | 'confirmed'>('form')
   const [recipientTouched, setRecipientTouched] = useState(false)
   const [formData, setFormData] = useState({
@@ -52,6 +55,8 @@ export function SendPage() {
   })
   const [trustline, setTrustline] = useState<TrustlineCheck | null>(null)
   const [isCheckingTrustline, setIsCheckingTrustline] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [optimisticId, setOptimisticId] = useState<string | null>(null)
 
   const selectedAsset =
     sendableAssets.find((asset) => asset.code === formData.asset) ?? sendableAssets[0]
@@ -100,7 +105,47 @@ export function SendPage() {
   }
 
   const handleConfirm = () => {
-    setStep('confirmed')
+    setIsSubmitting(true)
+
+    // Step 1: Add optimistic entry BEFORE async call
+    const txId = addOptimisticEntry({
+      type: 'sent',
+      asset: formData.asset,
+      amount: parseFloat(formData.amount),
+      recipient: formData.recipient,
+      timestamp: new Date(),
+    })
+    setOptimisticId(txId)
+
+    try {
+      // Step 2: Submit to backend (simulated for now)
+      // TODO: Replace with actual submitTransaction API call
+      // const result = await submitTransaction({
+      //   fromWalletId: currentUser.walletId,
+      //   toWalletId: formData.recipient,
+      //   amount: formData.amount,
+      //   assetCode: formData.asset,
+      // })
+
+      // Step 3: Simulate successful submission
+      setTimeout(() => {
+        // Step 3: Reconcile — remove optimistic, real entry appears via refetch
+        reconcileEntry(txId)
+        setOptimisticId(null)
+        setStep('confirmed')
+        setIsSubmitting(false)
+      }, 1500)
+
+      // Step 4: In real scenario, invalidate/refetch transaction list
+      // await refetchTransactions()
+    } catch (error) {
+      // Step 5: Remove optimistic entry on failure
+      removeOptimisticEntry(txId)
+      setOptimisticId(null)
+      setIsSubmitting(false)
+      // TODO: Show error toast
+      console.error('Transaction failed:', error)
+    }
   }
 
   const handleReset = () => {
@@ -498,9 +543,11 @@ export function SendPage() {
               <Button
                 className="flex-1 bg-primary hover:bg-primary/90"
                 onClick={handleConfirm}
-                disabled={isCheckingTrustline || trustline?.status === 'unfunded'}
+                disabled={isCheckingTrustline || trustline?.status === 'unfunded' || isSubmitting}
               >
-                {isCheckingTrustline ? (
+                {isSubmitting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : isCheckingTrustline ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <Send className="mr-2 h-4 w-4" />
