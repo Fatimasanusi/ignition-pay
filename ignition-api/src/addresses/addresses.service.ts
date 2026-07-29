@@ -8,9 +8,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { AddressResponseDto } from './dto/address-response.dto';
-import StellarSdk from '@stellar/stellar-sdk';
+import StellarSdk, { StrKey } from '@stellar/stellar-sdk';
 import { GenerateAddressDto } from './dto/generate-address.dto';
 import { WalletNetwork } from '../wallets/dto/create-wallet.dto';
+import { VerifyAddressResponseDto } from './dto/verify-address-response.dto';
 
 @Injectable()
 export class AddressesService {
@@ -200,5 +201,33 @@ export class AddressesService {
       where: { walletId },
       orderBy: { allocatedAt: 'desc' },
     });
+  }
+
+  verifyAddress(address: string): VerifyAddressResponseDto {
+    // Fast-path: must start with 'G' (Ed25519 public key version byte)
+    if (!address.startsWith('G')) {
+      return {
+        valid: false,
+        address,
+        reason: 'Address must start with G (Ed25519 public key prefix)',
+      };
+    }
+
+    // StrKey.isValidEd25519PublicKey performs full StrKey decoding:
+    // - Base32 decode
+    // - Version byte check (0x06 << 3 = 0x30 → 'G')
+    // - CRC-16 checksum validation
+    // - Payload length check (32 bytes)
+    const isValid = StrKey.isValidEd25519PublicKey(address);
+
+    if (!isValid) {
+      return {
+        valid: false,
+        address,
+        reason: 'Invalid StrKey checksum or malformed address',
+      };
+    }
+
+    return { valid: true, address };
   }
 }
