@@ -13,6 +13,9 @@ import {
   AlertTriangle,
   Banknote,
 } from 'lucide-react'
+
+import { INTERACTIVE_TIMEOUT_MS } from '@/features/anchors/services'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -91,6 +94,24 @@ export default function Sep24Wizard({
     return state.amount.length > 0 && parseFloat(state.amount) > 0 && !state.isSubmitting
   }, [state.amount, state.isSubmitting])
 
+  // Local error handling for interactive timeout/fallback
+  const [interactiveError, setInteractiveError] = useState<string | null>(null)
+  const [interactiveTimer, setInteractiveTimer] = useState<NodeJS.Timeout | null>(null)
+
+  // Start a timeout when the interactive step begins
+  useEffect(() => {
+    if (state.step === 'interactive' && state.interactiveUrl) {
+      const timer = setTimeout(() => {
+        setInteractiveError('The interactive flow timed out. Please try again.')
+      }, INTERACTIVE_TIMEOUT_MS)
+      setInteractiveTimer(timer)
+    }
+    // Cleanup on step change or unmount
+    return () => {
+      if (interactiveTimer) clearTimeout(interactiveTimer)
+    }
+  }, [state.step, state.interactiveUrl])
+
   const selectedAsset = SUPPORTED_ASSETS.find((a) => a.code === state.assetCode)
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -100,8 +121,10 @@ export default function Sep24Wizard({
   }
 
   const handleIframeLoad = () => {
-    // When the iframe loads, move to tracking step after a delay
-    // The anchor will redirect back to a URL we can detect
+    // When the iframe loads, clear any pending timeout and move to tracking step after a delay
+    if (interactiveTimer) clearTimeout(interactiveTimer)
+    setInteractiveError(null)
+    // Existing logic (if any) can remain here
   }
 
   const progressPercent = useMemo(() => {
@@ -259,76 +282,38 @@ export default function Sep24Wizard({
         )}
 
         {/* Step: Interactive / Tracking */}
-        {(state.step === 'interactive' || state.step === 'tracking') && state.interactiveUrl && (
+        {(state.step === 'interactive' || state.step === 'tracking') && (
           <div className="space-y-4">
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 flex gap-3">
-              <AlertTriangle size={20} className="text-amber-500 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-foreground">
-                <p className="font-semibold">Complete the flow in the window below</p>
-                <p className="text-muted-foreground">
-                  Follow the instructions provided by {state.anchorName} to complete your {state.operation}
-                </p>
+            {/* Interactive iframe */}
+            {interactiveError ? (
+              <div className="p-4 bg-destructive/10 rounded-md text-destructive">
+                <p className="font-semibold mb-2">{interactiveError}</p>
+                <Button variant="outline" onClick={onReset}>Retry</Button>
               </div>
-            </div>
-
-            {/* Iframe for interactive URL */}
-            <div className="border border-border rounded-xl overflow-hidden bg-background">
-              <div className="flex items-center justify-between px-4 py-2 bg-muted/50 border-b border-border">
-                <span className="text-xs text-muted-foreground font-mono truncate max-w-[80%]">
-                  {state.interactiveUrl}
-                </span>
-                <a
-                  href={state.interactiveUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-primary hover:underline flex items-center gap-1"
-                >
-                  Open in new tab <ExternalLink size={12} />
-                </a>
-              </div>
-              <iframe
-                src={state.interactiveUrl}
-                className="w-full h-[450px] sm:h-[550px] border-0"
-                title={`${state.anchorName} SEP-24 Interactive Flow`}
-                sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
-                onLoad={handleIframeLoad}
-                allow="payment *; camera *; microphone *"
-              />
-            </div>
-
-            {/* Status tracker */}
-            {state.status && (
-              <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-foreground">Transaction Status</span>
-                  {!isSep24Terminal(state.status.status) && (
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <RefreshCw size={12} className="animate-spin" />
-                      Updating automatically
-                    </span>
-                  )}
+            ) : (
+              state.interactiveUrl ? (
+                <iframe
+                  src={state.interactiveUrl}
+                  className="w-full h-96 border border-border rounded"
+                  onLoad={handleIframeLoad}
+                  onError={() => setInteractiveError('Failed to load interactive flow. Please try again.')}
+                />
+              ) : (
+                <div className="p-4 bg-muted/10 rounded-md text-muted-foreground">
+                  <p className="font-medium mb-2">Interactive URL not available.</p>
+                  <Button variant="outline" onClick={onReset}>Retry</Button>
                 </div>
-                <div className="flex items-center gap-3">
-                  {(() => {
-                    const Icon = STATUS_ICONS[state.status.status] ?? Clock
-                    return (
-                      <Icon
-                        size={24}
-                        className={STATUS_COLORS[state.status.status] ?? 'text-muted-foreground'}
-                      />
-                    )
-                  })()}
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      {SEP24_STATUS_LABELS[state.status.status] ?? state.status.status}
-                    </p>
-                    {state.status.statusDesc && (
-                      <p className="text-xs text-muted-foreground">{state.status.statusDesc}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
+              )
             )}
+            {/* Status display */}
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {SEP24_STATUS_LABELS[state.status.status] ?? state.status.status}
+              </p>
+              {state.status.statusDesc && (
+                <p className="text-xs text-muted-foreground">{state.status.statusDesc}</p>
+              )}
+            </div>
 
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={() => onClose()}>
