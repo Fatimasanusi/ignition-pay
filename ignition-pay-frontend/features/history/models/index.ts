@@ -13,7 +13,7 @@ export interface Transaction {
   amount: number
   recipient: string
   timestamp: Date
-  status: 'confirmed' | 'pending'
+  status: 'confirmed' | 'pending' | 'processing' | 'completed' | 'failed' | 'refunded'
   txHash?: string | null
 }
 

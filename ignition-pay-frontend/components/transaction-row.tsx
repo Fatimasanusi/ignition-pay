@@ -32,15 +32,29 @@ function TransactionStatusBadge({
     )
   }
 
-  if (transaction.status === 'pending') {
-    return (
-      <span className="text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-500">
-        Pending
-      </span>
-    )
+  const statusColors: Record<Transaction['status'], string> = {
+    pending: 'bg-yellow-500/20 text-yellow-500',
+    processing: 'bg-blue-500/20 text-blue-500',
+    completed: 'bg-green-500/20 text-green-500',
+    failed: 'bg-red-500/20 text-red-500',
+    refunded: 'bg-purple-500/20 text-purple-500',
+    confirmed: 'bg-green-500/20 text-green-500', // Assuming confirmed is same as completed
   }
 
-  return null
+  const statusLabel: Record<Transaction['status'], string> = {
+    pending: 'Pending',
+    processing: 'Processing',
+    completed: 'Completed',
+    failed: 'Failed',
+    refunded: 'Refunded',
+    confirmed: 'Confirmed',
+  }
+
+  return (
+    <span className={`text-xs px-2 py-1 rounded-full ${statusColors[transaction.status]}`}>
+      {statusLabel[transaction.status]}
+    </span>
+  )
 }
 
 interface TransactionRowProps {
