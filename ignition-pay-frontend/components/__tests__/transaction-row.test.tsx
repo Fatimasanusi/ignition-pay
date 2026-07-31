@@ -138,7 +138,81 @@ describe('TransactionRow', () => {
 
       render(<TransactionRow transaction={tx} />)
 
-      expect(screen.getByText('Pending')).toBeInTheDocument()
+      const badge = screen.getByText('Pending')
+      expect(badge).toBeInTheDocument()
+      expect(badge).toHaveClass('bg-yellow-500/20', 'text-yellow-500')
+    })
+
+    it('shows processing status badge for processing transactions', () => {
+      const tx: Transaction = {
+        id: 'tx-1',
+        type: 'sent',
+        asset: 'XLM',
+        amount: 100,
+        recipient: 'GXYZ...',
+        timestamp: new Date(),
+        status: 'processing',
+      }
+
+      render(<TransactionRow transaction={tx} />)
+
+      const badge = screen.getByText('Processing')
+      expect(badge).toBeInTheDocument()
+      expect(badge).toHaveClass('bg-blue-500/20', 'text-blue-500')
+    })
+
+    it('shows completed status badge for completed transactions', () => {
+      const tx: Transaction = {
+        id: 'tx-1',
+        type: 'sent',
+        asset: 'XLM',
+        amount: 100,
+        recipient: 'GXYZ...',
+        timestamp: new Date(),
+        status: 'completed',
+      }
+
+      render(<TransactionRow transaction={tx} />)
+
+      const badge = screen.getByText('Completed')
+      expect(badge).toBeInTheDocument()
+      expect(badge).toHaveClass('bg-green-500/20', 'text-green-500')
+    })
+
+    it('shows failed status badge for failed transactions', () => {
+      const tx: Transaction = {
+        id: 'tx-1',
+        type: 'sent',
+        asset: 'XLM',
+        amount: 100,
+        recipient: 'GXYZ...',
+        timestamp: new Date(),
+        status: 'failed',
+      }
+
+      render(<TransactionRow transaction={tx} />)
+
+      const badge = screen.getByText('Failed')
+      expect(badge).toBeInTheDocument()
+      expect(badge).toHaveClass('bg-red-500/20', 'text-red-500')
+    })
+
+    it('shows refunded status badge for refunded transactions', () => {
+      const tx: Transaction = {
+        id: 'tx-1',
+        type: 'sent',
+        asset: 'XLM',
+        amount: 100,
+        recipient: 'GXYZ...',
+        timestamp: new Date(),
+        status: 'refunded',
+      }
+
+      render(<TransactionRow transaction={tx} />)
+
+      const badge = screen.getByText('Refunded')
+      expect(badge).toBeInTheDocument()
+      expect(badge).toHaveClass('bg-purple-500/20', 'text-purple-500')
     })
   })
 
