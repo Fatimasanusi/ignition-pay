@@ -24,6 +24,8 @@ import { CreateAddressDto } from './dto/create-address.dto';
 import { UpdateAddressDto } from './dto/update-address.dto';
 import { AddressResponseDto } from './dto/address-response.dto';
 import { GenerateAddressDto } from './dto/generate-address.dto';
+import { VerifyAddressDto } from './dto/verify-address.dto';
+import { VerifyAddressResponseDto } from './dto/verify-address-response.dto';
 import { GenerateMemoDto } from './dto/generate-memo.dto';
 import { ValidateMemoDto } from './dto/validate-memo.dto';
 import { ResolveDepositDto } from './dto/resolve-deposit.dto';
@@ -115,6 +117,21 @@ export class AddressesController {
   @ApiResponse({ status: 404, description: 'Address not found' })
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.addressesService.remove(id);
+  }
+
+  @Post('verify')
+  @ApiOperation({
+    summary: 'Verify a Stellar address',
+    description:
+      'Validates the G-prefix and CRC-16 StrKey checksum of a Stellar Ed25519 public key server-side.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Validation result (always 200; check the `valid` field)',
+    type: VerifyAddressResponseDto,
+  })
+  verify(@Body() dto: VerifyAddressDto): VerifyAddressResponseDto {
+    return this.addressesService.verifyAddress(dto.address);
   }
 
   @Post('generate')

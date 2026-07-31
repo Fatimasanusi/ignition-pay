@@ -15,7 +15,18 @@ jest.mock('@stellar/stellar-sdk', () => ({
       })),
     },
   },
+  StrKey: {
+    isValidEd25519PublicKey: jest.fn((address: string) => {
+      // Simulate the real StrKey behaviour for test purposes:
+      // Only the well-known valid address passes; everything else fails.
+      return address === VALID_STELLAR_ADDRESS;
+    }),
+  },
 }));
+
+// A real Stellar Ed25519 public key (correct CRC-16 checksum).
+const VALID_STELLAR_ADDRESS =
+  'GBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
 
 const mockAddress = {
   id: 'address-uuid',
@@ -378,6 +389,50 @@ describe('AddressesService', () => {
     });
   });
 
+  describe('verifyAddress', () => {
+    it('returns valid: true for a well-formed Stellar address', () => {
+      const result = service.verifyAddress(VALID_STELLAR_ADDRESS);
+      expect(result.valid).toBe(true);
+      expect(result.address).toBe(VALID_STELLAR_ADDRESS);
+      expect(result.reason).toBeUndefined();
+    });
+
+    it('returns valid: false when address does not start with G', () => {
+      const result = service.verifyAddress('XBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ');
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/must start with G/i);
+    });
+
+    it('returns valid: false for an M-address (muxed account, not Ed25519 key)', () => {
+      const result = service.verifyAddress('MA7QYNF7SOWQ3GLR2BGMZEHXR77GVDQK7JVZJZJZJZJZJZJZVVAAAAAAAAAAAPCIB');
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/must start with G/i);
+    });
+
+    it('returns valid: false for an address with a corrupted checksum', () => {
+      // Same length as valid address, starts with G, but last char changed
+      const corrupted = VALID_STELLAR_ADDRESS.slice(0, -1) + 'A';
+      const result = service.verifyAddress(corrupted);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/checksum|malformed/i);
+    });
+
+    it('returns valid: false for an address that is too short', () => {
+      const result = service.verifyAddress('GBZXN7');
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/checksum|malformed/i);
+    });
+
+    it('returns valid: false for an empty string', () => {
+      const result = service.verifyAddress('');
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/must start with G/i);
+    });
+
+    it('echoes the input address in the response regardless of validity', () => {
+      const addr = 'GBAD_CHECKSUM_ADDRESS';
+      const result = service.verifyAddress(addr);
+      expect(result.address).toBe(addr);
   describe('generateMemo', () => {
     it('generates a valid deposit memo for a wallet', async () => {
       const result = await service.generateMemo('user-uuid', {

@@ -15,6 +15,7 @@ describe('AddressesController', () => {
       | 'remove'
       | 'generate'
       | 'listByWallet'
+      | 'verifyAddress'
       | 'generateMemo'
       | 'validateMemo'
       | 'resolveDeposit'
@@ -31,6 +32,7 @@ describe('AddressesController', () => {
       remove: jest.fn(),
       generate: jest.fn(),
       listByWallet: jest.fn(),
+      verifyAddress: jest.fn(),
       generateMemo: jest.fn(),
       validateMemo: jest.fn(),
       resolveDeposit: jest.fn(),
@@ -116,6 +118,49 @@ describe('AddressesController', () => {
     expect(res).toEqual([{ id: 'addr-123' }]);
   });
 
+  describe('verify()', () => {
+    const VALID_ADDRESS = 'GBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
+
+    it('should return valid: true for a valid Stellar address', () => {
+      service.verifyAddress.mockReturnValue({
+        valid: true,
+        address: VALID_ADDRESS,
+      });
+      const result = controller.verify({ address: VALID_ADDRESS });
+      expect(service.verifyAddress).toHaveBeenCalledWith(VALID_ADDRESS);
+      expect(result).toEqual({ valid: true, address: VALID_ADDRESS });
+    });
+
+    it('should return valid: false with reason for a non-G prefix address', () => {
+      const badAddress = 'XBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
+      service.verifyAddress.mockReturnValue({
+        valid: false,
+        address: badAddress,
+        reason: 'Address must start with G (Ed25519 public key prefix)',
+      });
+      const result = controller.verify({ address: badAddress });
+      expect(service.verifyAddress).toHaveBeenCalledWith(badAddress);
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/must start with G/i);
+    });
+
+    it('should return valid: false with reason for a corrupted-checksum address', () => {
+      const corrupted = VALID_ADDRESS.slice(0, -1) + 'A';
+      service.verifyAddress.mockReturnValue({
+        valid: false,
+        address: corrupted,
+        reason: 'Invalid StrKey checksum or malformed address',
+      });
+      const result = controller.verify({ address: corrupted });
+      expect(result.valid).toBe(false);
+      expect(result.reason).toMatch(/checksum|malformed/i);
+    });
+
+    it('should always return HTTP 200 (method returns synchronously, not throwing)', () => {
+      service.verifyAddress.mockReturnValue({ valid: false, address: 'BAD', reason: 'test' });
+      // controller.verify is synchronous; if it doesn't throw, NestJS sends 200
+      expect(() => controller.verify({ address: 'BAD' })).not.toThrow();
+    });
   it('generateMemo() should call addressesService.generateMemo', async () => {
     const req = { user: { sub: 'user-123' } };
     const dto = { walletId: 'w-123', memoType: 'id' as any };
