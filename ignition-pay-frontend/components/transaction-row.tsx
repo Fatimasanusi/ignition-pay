@@ -3,6 +3,15 @@
 import { ArrowUpRight, ArrowDownLeft, Loader2 } from 'lucide-react'
 import type { Transaction, OptimisticTransaction } from '@/features/history/models'
 import { isOptimisticTransaction } from '@/features/history/models'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet'
+import { ExternalLink } from 'lucide-react'
 
 interface TransactionRowProps {
   transaction: Transaction | OptimisticTransaction
@@ -75,7 +84,15 @@ export function TransactionRow({ transaction }: TransactionRowProps) {
 
   const isOptimistic = isOptimisticTransaction(transaction)
 
+  // Determine standard fee
+  const networkFee = '0.00001 XLM'
+  const explorerLink = transaction.txHash
+    ? `https://stellar.expert/explorer/public/tx/${transaction.txHash}`
+    : '#'
+
   return (
+    <Sheet>
+      <SheetTrigger asChild>
     <div
       className={`flex items-center justify-between py-4 px-4 rounded-lg transition-colors border ${
         isOptimistic
@@ -112,5 +129,73 @@ export function TransactionRow({ transaction }: TransactionRowProps) {
         <TransactionStatusBadge transaction={transaction} />
       </div>
     </div>
+      </SheetTrigger>
+      
+      <SheetContent side="right">
+        <SheetHeader>
+          <SheetTitle>Transaction Details</SheetTitle>
+          <SheetDescription>
+            Additional information about this transfer
+          </SheetDescription>
+        </SheetHeader>
+        
+        <div className="mt-6 space-y-6">
+          {/* Status */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Status</span>
+            <TransactionStatusBadge transaction={transaction} />
+          </div>
+
+          {/* Amount */}
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-muted-foreground">Amount</span>
+            <p className={`text-xl font-bold ${isSent ? 'text-red-500' : 'text-green-500'}`}>
+              {isSent ? '-' : '+'}{amount.toFixed(4)} {asset}
+            </p>
+          </div>
+
+          {/* Timestamp */}
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-muted-foreground">Date & Time</span>
+            <p className="text-sm text-foreground">{formattedDate}</p>
+          </div>
+
+          {/* Fee */}
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-muted-foreground">Network Fee</span>
+            <p className="text-sm text-foreground">{networkFee}</p>
+          </div>
+
+          {/* Recipient */}
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-muted-foreground">{isSent ? 'To' : 'From'}</span>
+            <p className="text-sm font-mono break-all bg-muted/30 p-2 rounded-md">
+              {recipient}
+            </p>
+          </div>
+
+          {/* Hash & Explorer Link */}
+          {!isOptimistic && transaction.txHash && (
+            <div className="flex flex-col gap-1 pt-4 border-t border-border">
+              <span className="text-sm text-muted-foreground">Transaction Hash</span>
+              <div className="flex items-center justify-between gap-2 mt-1">
+                <p className="text-xs font-mono break-all flex-1">
+                  {transaction.txHash}
+                </p>
+                <a
+                  href={explorerLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2 hover:bg-muted rounded-md transition-colors text-primary flex-shrink-0"
+                  title="View on Stellar Expert"
+                >
+                  <ExternalLink size={16} />
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }
