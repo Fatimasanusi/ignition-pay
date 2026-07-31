@@ -14,6 +14,7 @@ import {
   Banknote,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   Dialog,
   DialogContent,
@@ -21,7 +22,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
-import type { Sep24WizardState, Sep24Operation } from '@/features/anchors/models'
+import type { Sep24WizardState, Sep24Operation, QuoteResponse } from '@/features/anchors/models'
 import { SEP24_STATUS_LABELS, isSep24Terminal } from '@/features/anchors/services'
 
 const SUPPORTED_ASSETS = [
@@ -73,7 +74,8 @@ interface Sep24WizardProps {
   onSetAssetCode: (code: string) => void
   onSetAssetIssuer: (issuer?: string) => void
   onSetAmount: (amount: string) => void
-  onSubmit: (stellarAccount: string) => void
+  onGetQuote: () => void
+  onConfirmQuote: (stellarAccount: string) => void
   onReset: () => void
 }
 
@@ -84,7 +86,8 @@ export default function Sep24Wizard({
   onSetAssetCode,
   onSetAssetIssuer,
   onSetAmount,
-  onSubmit,
+  onGetQuote,
+  onConfirmQuote,
   onReset,
 }: Sep24WizardProps) {
   const canSubmit = useMemo(() => {
@@ -96,7 +99,7 @@ export default function Sep24Wizard({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSubmit) return
-    onSubmit('GABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN')
+    onGetQuote()
   }
 
   const handleIframeLoad = () => {
@@ -105,7 +108,7 @@ export default function Sep24Wizard({
   }
 
   const progressPercent = useMemo(() => {
-    const steps = ['operation', 'form', 'interactive', 'tracking', 'completed']
+    const steps = ['operation', 'form', 'quote', 'interactive', 'tracking', 'completed']
     const idx = state.step === 'error' ? 4 : steps.indexOf(state.step)
     return Math.round(((idx + 1) / steps.length) * 100)
   }, [state.step])
@@ -120,6 +123,7 @@ export default function Sep24Wizard({
           <DialogDescription>
             {state.step === 'operation' && 'Choose whether to deposit or withdraw funds'}
             {state.step === 'form' && 'Enter the amount and asset details'}
+            {state.step === 'quote' && 'Review your quote before continuing'}
             {state.step === 'interactive' && 'Complete the interactive flow with the anchor'}
             {state.step === 'completed' && state.status && isSep24Terminal(state.status.status) && state.status.status !== 'completed'
               ? 'Transaction did not complete'
@@ -256,6 +260,77 @@ export default function Sep24Wizard({
               </Button>
             </div>
           </form>
+        )}
+
+        {/* Step: Quote */}
+        {state.step === 'quote' && state.quote && (
+          <div className="space-y-6">
+            <div className="bg-card rounded-xl border border-primary/30 p-6 space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Banknote size={24} className="text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-foreground">Quote Received</p>
+                    <p className="text-sm text-muted-foreground">
+                      Rate from {state.anchorName}
+                    </p>
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-xs">
+                  Expires {new Date(state.quote.expiresAt).toLocaleTimeString()}
+                </Badge>
+              </div>
+
+              <div className="bg-muted/30 rounded-lg p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">You send</span>
+                  <span className="text-lg font-bold text-foreground">
+                    {parseFloat(state.quote.sellAmount).toFixed(2)} {state.quote.sellAsset}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Exchange rate</span>
+                  <span className="text-sm font-semibold text-foreground">
+                    1 {state.quote.sellAsset} = {state.quote.price} {state.quote.buyAsset}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">You receive</span>
+                  <span className="text-lg font-bold text-green-500">
+                    {parseFloat(state.quote.buyAmount).toFixed(2)} {state.quote.buyAsset}
+                  </span>
+                </div>
+                {state.quote.fee && (
+                  <div className="border-t border-border pt-3 flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Fee</span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {state.quote.fee.total} {state.quote.fee.asset}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => onReset()}>
+                Edit Amount
+              </Button>
+              <Button
+                className="flex-1 bg-primary hover:bg-primary/90"
+                disabled={state.isSubmitting}
+                onClick={() => onConfirmQuote('GABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMN')}
+              >
+                {state.isSubmitting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                )}
+                Confirm & Continue
+              </Button>
+            </div>
+          </div>
         )}
 
         {/* Step: Interactive / Tracking */}

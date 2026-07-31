@@ -34,6 +34,7 @@ import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
 import { NotificationsModule } from './notifications/notifications.module';
 import { Sep24Module } from './sep24/sep24.module';
 import { SettingsModule } from './settings/settings.module';
+import { Sep38Module } from './sep38/sep38.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { SettingsModule } from './settings/settings.module';
     NotificationsModule,
     Sep24Module,
     SettingsModule,
+    Sep38Module,
   ],
   controllers: [AppController],
   providers: [
