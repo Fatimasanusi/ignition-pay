@@ -13,6 +13,7 @@ import type {
   QuoteRequest,
   QuoteResponse,
 } from '@/features/anchors/models'
+export const INTERACTIVE_TIMEOUT_MS = 120000 // 2 minutes
 
 function apiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL

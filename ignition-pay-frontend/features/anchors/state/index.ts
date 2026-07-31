@@ -33,9 +33,26 @@ const INITIAL_STATE: Sep24WizardState = {
 export function useSep24Wizard() {
   const [state, setState] = useState<Sep24WizardState>(INITIAL_STATE)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Ref for interactive timeout handling
+  const interactiveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const clearPolling = useCallback(() => {
+    // Clear polling interval and abort controller
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    if (abortRef.current) {
+      abortRef.current.abort()
+      abortRef.current = null
+    }
+    // Clear any interactive timeout
+    if (interactiveTimeoutRef.current) {
+      clearTimeout(interactiveTimeoutRef.current)
+      interactiveTimeoutRef.current = null
+    }
+  }, [])
     if (pollRef.current) {
       clearInterval(pollRef.current)
       pollRef.current = null
@@ -158,6 +175,19 @@ export function useSep24Wizard() {
           },
         }))
 
+        // Start interactive timeout timer
+        if (interactiveTimeoutRef.current) {
+          clearTimeout(interactiveTimeoutRef.current)
+        }
+        interactiveTimeoutRef.current = setTimeout(() => {
+          setState((prev) => ({
+            ...prev,
+            step: 'error',
+            error: 'Interactive flow timed out. Please try again or open in a new tab.',
+          }))
+          clearPolling()
+        }, INTERACTIVE_TIMEOUT_MS)
+
         startPolling(result.id)
       } catch (err: any) {
         setState((prev) => ({
@@ -188,6 +218,11 @@ export function useSep24Wizard() {
           }))
 
           if (isSep24Terminal(status.status)) {
+     // Clear interactive timeout when terminal state reached
+     if (interactiveTimeoutRef.current) {
+       clearTimeout(interactiveTimeoutRef.current)
+       interactiveTimeoutRef.current = null
+     }
             clearPolling()
           }
         } catch (err: any) {

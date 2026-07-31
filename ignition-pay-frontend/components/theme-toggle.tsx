@@ -26,42 +26,7 @@ const modeAriaLabel: Record<ThemeMode, string> = {
 
 const modeOrder: ThemeMode[] = ['light', 'dark', 'system']
 
-export function ThemeToggle() {
-  const { mode, setMode } = useTheme()
-  const [announcement, setAnnouncement] = useState('')
-  const Icon = modeIcon[mode]
 
-  const cycle = () => {
-    const idx = modeOrder.indexOf(mode)
-    const nextMode = modeOrder[(idx + 1) % modeOrder.length]
-    setMode(nextMode)
-    setAnnouncement(`Theme changed to ${nextMode} mode`)
-  }
-
-  return (
-    <>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={cycle}
-        aria-label={modeAriaLabel[mode]}
-        title={modeLabel[mode]}
-        aria-pressed={mode === 'dark'}
-      >
-        <Icon size={18} />
-      </Button>
-      <div
-        role="status"
-        aria-live="polite"
-        className="sr-only"
-      >
-        {announcement}
-      </div>
-    </>
-  )
-}
-
-export default ThemeToggle
 const modes: { value: ThemeMode; icon: typeof Sun; label: string; shortLabel: string }[] = [
   { value: 'light', icon: Sun, label: 'Light mode', shortLabel: 'Light' },
   { value: 'dark', icon: Moon, label: 'Dark mode', shortLabel: 'Dark' },

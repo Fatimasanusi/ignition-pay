@@ -18,20 +18,12 @@ function getInitialTheme(): ThemeMode {
 
 export function useTheme() {
   const [mode, setModeState] = useState<ThemeMode>(getInitialTheme)
-
-  useEffect(() => {
-    const current = getStoredTheme()
-    setModeState(current)
-    applyTheme(current)
-
-    if (current === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-  const [mode, setModeState] = useState<ThemeMode>('dark')
   const [contrast, setContrastState] = useState<ContrastLevel>('normal')
   const [hydrated, setHydrated] = useState(false)
   const mqlRef = useRef<MediaQueryList | null>(null)
   const handlerRef = useRef<(() => void) | null>(null)
 
+  // Initialize from storage and mark as hydrated
   useEffect(() => {
     const stored = getStoredTheme()
     const storedContrast = getStoredContrast()
@@ -41,9 +33,9 @@ export function useTheme() {
     setHydrated(true)
   }, [])
 
+  // Watch system color scheme when in 'system' mode
   useEffect(() => {
     if (!hydrated) return
-
     const mql = mqlRef.current ?? window.matchMedia('(prefers-color-scheme: dark)')
     mqlRef.current = mql
 
@@ -56,8 +48,9 @@ export function useTheme() {
       const handler = () => applyTheme('system', contrast)
       handlerRef.current = handler
       mql.addEventListener('change', handler)
-      applyTheme('system', contrast)
     }
+    // Apply theme on each mode/contrast change
+    applyTheme(mode, contrast)
 
     return () => {
       if (handlerRef.current) {
@@ -100,6 +93,4 @@ export function useTheme() {
     isHighContrast,
     hydrated,
   }
-}
-  return { mode, setMode, toggle, isDark, isLight, isSystem, hydrated }
 }
