@@ -3,6 +3,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from '../prisma/prisma.module';
 import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
+import { ApiKeyExpirationService } from '../api-keys/api-key-expiration.service';
 import { AddressesController } from './addresses.controller';
 import { AddressesService } from './addresses.service';
 
@@ -20,6 +23,12 @@ import { AddressesService } from './addresses.service';
     }),
   ],
   controllers: [AddressesController],
-  providers: [AddressesService, JwtAuthGuard],
+  providers: [
+    AddressesService,
+    JwtAuthGuard,
+    ApiKeyGuard,
+    ApiKeyScopeGuard,
+    ApiKeyExpirationService,
+  ],
 })
 export class AddressesModule {}

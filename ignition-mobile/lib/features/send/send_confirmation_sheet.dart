@@ -1,0 +1,51 @@
+import 'package:flutter/material.dart';
+
+/// Bottom sheet summarizing a pending payment before it is broadcast.
+class SendConfirmationSheet extends StatelessWidget {
+  final String recipient;
+  final String amount;
+  final String asset;
+  final String fee;
+  final String? memo;
+  final VoidCallback onConfirm;
+
+  const SendConfirmationSheet({
+    super.key,
+    required this.recipient,
+    required this.amount,
+    required this.asset,
+    required this.fee,
+    this.memo,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasMemo = memo != null && memo!.isNotEmpty;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Review payment', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 16),
+          _row('Recipient', recipient),
+          _row('Amount', '$amount $asset'),
+          _row('Network fee', fee),
+          if (hasMemo) _row('Memo', memo!),
+          const SizedBox(height: 24),
+          SizedBox(
+              width: double.infinity,
+              child: FilledButton(onPressed: onConfirm, child: const Text('Slide to send'))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _row(String label, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(label, style: const TextStyle(color: Colors.grey)),
+          Flexible(child: Text(value, textAlign: TextAlign.end)),
+        ]),
+      );
+}

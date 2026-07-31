@@ -44,9 +44,13 @@ class MuxedAddress {
 
   static List<int> _decodeG(String g) {
     try {
-      final decoded = StrKeyUtil.decodeBase32(g);
+      // Use decodeBase32Checked to validate the CRC-16 checksum on the
+      // G address. On failure it throws FormatException, which we wrap
+      // as a StellarAddressException.
+      final decoded = StrKeyUtil.decodeBase32Checked(g);
       return decoded.sublist(1, 33);
     } catch (e) {
+      if (e is StellarAddressException) rethrow;
       throw const StellarAddressException('Failed to decode G address');
     }
   }

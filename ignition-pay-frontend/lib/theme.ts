@@ -1,6 +1,10 @@
 export type ThemeMode = 'light' | 'dark' | 'system'
+export type ContrastLevel = 'normal' | 'high'
 
 export interface ThemePalette {
+  brandAccent: string
+  brandAccentHover?: string
+  brandAccentMuted?: string
   background: string
   foreground: string
   card: string
@@ -38,6 +42,7 @@ export interface TypographyScale {
 
 export interface ThemeConfig {
   mode: ThemeMode
+  contrast: ContrastLevel
   palette: ThemePalette
   typography: TypographyScale
   borderRadius: Record<string, string>
@@ -86,7 +91,14 @@ export const borderRadiusScale = {
   full: '9999px',
 }
 
+export const brandAccent = 'oklch(0.56 0.184 161.36)'
+export const brandAccentHighContrastDark = 'oklch(0.62 0.22 161.36)'
+export const brandAccentHighContrastLight = 'oklch(0.52 0.25 161.36)'
+
 export const lightPalette: ThemePalette = {
+  brandAccent: brandAccent,
+  brandAccentHover: 'oklch(0.5 0.22 161.36)',
+  brandAccentMuted: 'oklch(0.56 0.184 161.36 / 0.15)',
   background: 'oklch(1 0 0)',
   foreground: 'oklch(0.145 0 0)',
   card: 'oklch(1 0 0)',
@@ -99,7 +111,7 @@ export const lightPalette: ThemePalette = {
   secondaryForeground: 'oklch(0.205 0 0)',
   muted: 'oklch(0.97 0 0)',
   mutedForeground: 'oklch(0.556 0 0)',
-  accent: 'oklch(0.97 0 0)',
+  accent: brandAccent,
   accentForeground: 'oklch(0.205 0 0)',
   destructive: 'oklch(0.577 0.245 27.325)',
   border: 'oklch(0.922 0 0)',
@@ -109,39 +121,42 @@ export const lightPalette: ThemePalette = {
   sidebarForeground: 'oklch(0.145 0 0)',
   sidebarPrimary: 'oklch(0.205 0 0)',
   sidebarPrimaryForeground: 'oklch(0.985 0 0)',
-  sidebarAccent: 'oklch(0.97 0 0)',
+  sidebarAccent: brandAccent,
   sidebarAccentForeground: 'oklch(0.205 0 0)',
   sidebarBorder: 'oklch(0.922 0 0)',
   sidebarRing: 'oklch(0.708 0 0)',
 }
 
 export const darkPalette: ThemePalette = {
+  brandAccent: brandAccent,
+  brandAccentHover: 'oklch(0.5 0.22 161.36)',
+  brandAccentMuted: 'oklch(0.56 0.184 161.36 / 0.15)',
   background: 'oklch(0.08 0 0)',
   foreground: 'oklch(0.95 0 0)',
   card: 'oklch(0.12 0 0)',
   cardForeground: 'oklch(0.95 0 0)',
   popover: 'oklch(0.12 0 0)',
   popoverForeground: 'oklch(0.95 0 0)',
-  primary: 'oklch(0.56 0.184 161.36)',
+  primary: brandAccent,
   primaryForeground: 'oklch(0.95 0 0)',
   secondary: 'oklch(0.18 0 0)',
   secondaryForeground: 'oklch(0.95 0 0)',
   muted: 'oklch(0.22 0 0)',
   mutedForeground: 'oklch(0.64 0 0)',
-  accent: 'oklch(0.56 0.184 161.36)',
+  accent: brandAccent,
   accentForeground: 'oklch(0.08 0 0)',
   destructive: 'oklch(0.704 0.191 22.216)',
   border: 'oklch(1 0 0 / 8%)',
   input: 'oklch(1 0 0 / 12%)',
-  ring: 'oklch(0.56 0.184 161.36)',
+  ring: brandAccent,
   sidebar: 'oklch(0.12 0 0)',
   sidebarForeground: 'oklch(0.95 0 0)',
-  sidebarPrimary: 'oklch(0.56 0.184 161.36)',
+  sidebarPrimary: brandAccent,
   sidebarPrimaryForeground: 'oklch(0.08 0 0)',
-  sidebarAccent: 'oklch(0.56 0.184 161.36)',
+  sidebarAccent: brandAccent,
   sidebarAccentForeground: 'oklch(0.08 0 0)',
   sidebarBorder: 'oklch(1 0 0 / 8%)',
-  sidebarRing: 'oklch(0.56 0.184 161.36)',
+  sidebarRing: brandAccent,
 }
 
 export const fontConfig = {
@@ -150,16 +165,17 @@ export const fontConfig = {
   heading: 'var(--font-heading), var(--font-geist-sans), system-ui, sans-serif',
 } as const
 
-export function getThemeConfig(mode: ThemeMode): ThemeConfig {
+export function getThemeConfig(mode: ThemeMode, contrast: ContrastLevel = 'normal'): ThemeConfig {
   return {
     mode,
+    contrast,
     palette: mode === 'dark' ? darkPalette : lightPalette,
     typography: typographyScale,
     borderRadius: borderRadiusScale,
   }
 }
 
-export function applyTheme(mode: ThemeMode): void {
+export function applyTheme(mode: ThemeMode, contrast: ContrastLevel = 'normal'): void {
   const root = document.documentElement
   const resolved =
     mode === 'system'
@@ -169,6 +185,8 @@ export function applyTheme(mode: ThemeMode): void {
       : mode
 
   root.classList.toggle('dark', resolved === 'dark')
+  root.classList.toggle('high-contrast', contrast === 'high')
+  root.style.colorScheme = resolved === 'dark' ? 'dark' : 'light'
 }
 
 export function getStoredTheme(): ThemeMode {
@@ -178,4 +196,13 @@ export function getStoredTheme(): ThemeMode {
 
 export function storeTheme(mode: ThemeMode): void {
   localStorage.setItem('theme', mode)
+}
+
+export function getStoredContrast(): ContrastLevel {
+  if (typeof window === 'undefined') return 'normal'
+  return (localStorage.getItem('contrast') as ContrastLevel) || 'normal'
+}
+
+export function storeContrast(contrast: ContrastLevel): void {
+  localStorage.setItem('contrast', contrast)
 }

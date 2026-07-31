@@ -1,12 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ExecutionContext } from '@nestjs/common';
 import { CampaignsController } from './campaigns.controller';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { BrowseCampaignsQueryDto } from './dto/browse-campaigns.dto';
 import { PermissionsService } from '../auth/permissions/permissions.service';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
+
+const allowAllGuard = { canActivate: (_ctx: ExecutionContext) => true };
 
 describe('CampaignsController', () => {
   let controller: CampaignsController;
@@ -40,7 +44,12 @@ describe('CampaignsController', () => {
           useValue: { getUserPermissions: jest.fn() },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(ApiKeyGuard)
+      .useValue(allowAllGuard)
+      .overrideGuard(ApiKeyScopeGuard)
+      .useValue(allowAllGuard)
+      .compile();
 
     controller = module.get<CampaignsController>(CampaignsController);
   });

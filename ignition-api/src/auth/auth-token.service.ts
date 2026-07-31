@@ -59,16 +59,16 @@ interface AccessTokenPayload {
 export class AuthTokenService {
   private readonly logger = new Logger(AuthTokenService.name);
 
-  /** 7 days — refresh-token / session TTL */
-  private readonly REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-  /** 15 minutes — access-token TTL */
-  private readonly ACCESS_TTL = '15m';
+  /** Default values as fallback */
+  private readonly DEFAULT_REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  private readonly DEFAULT_ACCESS_TTL = '15m';
 
   constructor(
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly permissionsService: PermissionsService,
+    private readonly settingsService: SettingsService,
     @Inject(CACHE_MANAGER) private readonly cache: Keyv,
   ) {}
 
@@ -117,6 +117,11 @@ export class AuthTokenService {
   ): Promise<LoginResponseDto> {
     const walletAddress = user.walletAddress ?? '';
     const fid = familyId ?? randomUUID();
+    
+    // Get current session settings from database
+    const settings = await this.settingsService.getSettings();
+    const accessTtlSeconds = settings.sessionAccessTtlSeconds;
+    const refreshTtlSeconds = settings.sessionTtlSeconds;
 
     const accessPayload: AccessTokenPayload = {
       sub: user.id,
@@ -128,7 +133,7 @@ export class AuthTokenService {
 
     const accessToken = this.jwt.sign(accessPayload, {
       secret: this.config.get<string>('JWT_SECRET', 'default-secret'),
-      expiresIn: this.ACCESS_TTL,
+      expiresIn: `${accessTtlSeconds}s`,
     });
 
     const refreshPayload: RefreshTokenPayload = {
@@ -142,7 +147,7 @@ export class AuthTokenService {
         'REFRESH_TOKEN_SECRET',
         'default-refresh-secret',
       ),
-      expiresIn: '7d',
+      expiresIn: `${refreshTtlSeconds}s`,
     });
 
     const record: StoredRefreshRecord = { token: refreshToken, familyId: fid };
@@ -152,7 +157,7 @@ export class AuthTokenService {
       await this.cache.set(
         this.refreshCacheKey(walletAddress),
         JSON.stringify(record),
-        this.REFRESH_TTL_MS,
+        refreshTtlSeconds * 1000,
       );
     } catch {
       throw new ServiceUnavailableException('Service temporarily unavailable');
@@ -280,6 +285,11 @@ export class AuthTokenService {
     // ── Token matches — rotate ───────────────────────────────────────────
     // Issue #230: derive scopes from the current role so demotions/promotions
     // take effect on the next refresh, without invalidating active sessions.
+    // Get current session settings from database
+    const settings = await this.settingsService.getSettings();
+    const accessTtlSeconds = settings.sessionAccessTtlSeconds;
+    const refreshTtlSeconds = settings.sessionTtlSeconds;
+
     const rotationPayload: AccessTokenPayload = {
       sub: user.id,
       walletAddress: user.walletAddress ?? '',
@@ -289,7 +299,7 @@ export class AuthTokenService {
 
     const accessToken = this.jwt.sign(rotationPayload, {
       secret: this.config.get<string>('JWT_SECRET', 'default-secret'),
-      expiresIn: this.ACCESS_TTL,
+      expiresIn: `${accessTtlSeconds}s`,
     });
 
     // Issue #226: preserve the same family ID across the rotation chain so
@@ -305,7 +315,7 @@ export class AuthTokenService {
         'REFRESH_TOKEN_SECRET',
         'default-refresh-secret',
       ),
-      expiresIn: '7d',
+      expiresIn: `${refreshTtlSeconds}s`,
     });
 
     const newRecord: StoredRefreshRecord = {
@@ -318,7 +328,7 @@ export class AuthTokenService {
       await this.cache.set(
         cacheKey,
         JSON.stringify(newRecord),
-        this.REFRESH_TTL_MS,
+        refreshTtlSeconds * 1000,
       );
     } catch {
       throw new ServiceUnavailableException('Service temporarily unavailable');

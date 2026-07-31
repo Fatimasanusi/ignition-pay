@@ -7,25 +7,52 @@ import {
   User,
   Eye,
   EyeOff,
-  Zap,
   Shield,
   LogOut,
   Copy,
   ArrowUpRight,
+  BarChart3,
+  Key,
+  Globe,
+  Smartphone,
+  Trash2,
+  RefreshCw,
+  Plus,
+  Palette,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { APP_VERSION } from '@/lib/version'
+import { useAnalyticsConsent } from '@/hooks/use-consent'
+import { usePreferences } from '../state'
+import { updateProfile } from '../services'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { useTheme } from '@/hooks/use-theme'
 
 export function SettingsPage() {
   const [showSeed, setShowSeed] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [displayName, setDisplayName] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
   const [notifications, setNotifications] = useState({
     payments: true,
     anchors: true,
     security: true,
     news: false,
   })
+  const { consented, setConsented } = useAnalyticsConsent()
+  const { mode, setMode } = useTheme()
+  const [sessions] = useState([
+    { id: '1', device: 'Chrome on macOS', ip: '192.168.1.1', lastActive: '2 minutes ago', current: true },
+    { id: '2', device: 'Safari on iPhone', ip: '192.168.1.2', lastActive: '2 hours ago', current: false },
+  ])
+  const [apiKeys] = useState([
+    { id: '1', name: 'Production API Key', prefix: 'sk_p...a1b2', created: 'Jan 15, 2026', lastUsed: 'Today' },
+    { id: '2', name: 'Development API Key', prefix: 'sk_d...c3d4', created: 'Mar 3, 2026', lastUsed: 'Yesterday' },
+  ])
+  const [showApiKey, setShowApiKey] = useState<string | null>(null)
+  const { preferences, save, saving } = usePreferences()
+  const { mode } = useTheme()
 
   const mockSeedPhrase =
     'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -68,13 +95,35 @@ export function SettingsPage() {
 
           <div className="space-y-4">
             <div className="flex items-center justify-between py-4 border-b border-border">
-              <div>
-                <p className="font-semibold text-foreground">Account Name</p>
-                <p className="text-sm text-muted-foreground">My Stellar Wallet</p>
+              <div className="flex-1 mr-4">
+                <p className="font-semibold text-foreground mb-1">Display Name</p>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  onBlur={() => {
+                    if (displayName) updateProfile({ displayName })
+                  }}
+                  placeholder="Your display name"
+                  className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary"
+                />
               </div>
-              <Button variant="outline" size="sm">
-                Edit
-              </Button>
+            </div>
+
+            <div className="flex items-center justify-between py-4 border-b border-border">
+              <div className="flex-1 mr-4">
+                <p className="font-semibold text-foreground mb-1">Avatar URL</p>
+                <input
+                  type="url"
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  onBlur={() => {
+                    if (avatarUrl) updateProfile({ avatarUrl })
+                  }}
+                  placeholder="https://example.com/avatar.png"
+                  className="w-full px-3 py-1.5 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary"
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-between py-4 border-b border-border">
@@ -191,6 +240,93 @@ export function SettingsPage() {
           </div>
         </div>
 
+        {/* Security Section - Sessions */}
+        <div className="bg-card rounded-xl border border-border p-8 space-y-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+              <Globe size={20} className="text-indigo-500" />
+            </div>
+            <h2 className="text-xl font-bold text-foreground">Active Sessions</h2>
+          </div>
+
+          <div className="space-y-4">
+            {sessions.map((session) => (
+              <div key={session.id} className="flex items-center justify-between py-4 border-b border-border last:border-b-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-background flex items-center justify-center">
+                    <Smartphone size={16} className="text-muted-foreground" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground flex items-center gap-2">
+                      {session.device}
+                      {session.current && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
+                          Current
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      IP {session.ip} &middot; Active {session.lastActive}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-400 hover:bg-red-500/10">
+                  <Trash2 size={16} />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Security Section - API Keys */}
+        <div className="bg-card rounded-xl border border-border p-8 space-y-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                <Key size={20} className="text-cyan-500" />
+              </div>
+              <h2 className="text-xl font-bold text-foreground">API Keys</h2>
+            </div>
+            <Button variant="outline" size="sm">
+              <Plus size={16} className="mr-2" />
+              Create Key
+            </Button>
+          </div>
+
+          <div className="space-y-4">
+            {apiKeys.map((key) => (
+              <div key={key.id} className="flex items-center justify-between py-4 border-b border-border last:border-b-0">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-semibold text-foreground">{key.name}</p>
+                    <button
+                      onClick={() => setShowApiKey(showApiKey === key.id ? null : key.id)}
+                      className="text-primary hover:text-primary/80 transition-colors"
+                      aria-label={showApiKey === key.id ? 'Hide API key' : 'Show API key'}
+                    >
+                      {showApiKey === key.id ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                  <p className="text-sm font-mono text-muted-foreground">
+                    {showApiKey === key.id ? `${key.prefix}...${key.id}${key.id}${key.id}` : key.prefix.concat('...')}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Created {key.created} &middot; Last used {key.lastUsed}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                    <RefreshCw size={14} />
+                  </Button>
+                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-400 hover:bg-red-500/10">
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Notifications Section */}
         <div className="bg-card rounded-xl border border-border p-8 space-y-6">
           <div className="flex items-center gap-3 mb-6">
@@ -231,12 +367,18 @@ export function SettingsPage() {
                   <input
                     type="checkbox"
                     checked={value}
-                    onChange={() =>
-                      setNotifications({
-                        ...notifications,
-                        [key]: !value,
+                    onChange={() => {
+                      const next = { ...notifications, [key]: !value }
+                      setNotifications(next)
+                      save({
+                        ...preferences,
+                        notifications: {
+                          email: next.payments,
+                          push: next.security,
+                          sms: next.anchors,
+                        },
                       })
-                    }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-muted peer-checked:bg-primary rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all" />
@@ -246,11 +388,45 @@ export function SettingsPage() {
           </div>
         </div>
 
+        {/* Privacy Section */}
+        <div className="bg-card rounded-xl border border-border p-8 space-y-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
+              <BarChart3 size={20} className="text-orange-500" />
+            </div>
+            <h2 className="text-xl font-bold text-foreground">Privacy</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-4">
+              <div>
+                <p className="font-semibold text-foreground">
+                  Analytics &amp; Usage Data
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Help improve Ignition Pay by sharing anonymous usage data.
+                  No personal or financial information is collected.
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={consented}
+                  onChange={() => setConsented(!consented)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-muted peer-checked:bg-primary rounded-full peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all" />
+              </label>
+            </div>
+          </div>
+        </div>
+
         {/* Preferences Section */}
         <div className="bg-card rounded-xl border border-border p-8 space-y-6">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-full bg-purple-500/20 flex items-center justify-center">
-              <Zap size={20} className="text-purple-500" />
+              <Palette size={20} className="text-purple-500" />
             </div>
             <h2 className="text-xl font-bold text-foreground">Preferences</h2>
           </div>
@@ -259,36 +435,57 @@ export function SettingsPage() {
             <div className="flex items-center justify-between py-4 border-b border-border">
               <div>
                 <p className="font-semibold text-foreground">Currency</p>
-                <p className="text-sm text-muted-foreground">USD</p>
+                <p className="text-sm text-muted-foreground">{preferences.currency}</p>
               </div>
-              <select className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary">
-                <option>USD</option>
-                <option>EUR</option>
-                <option>GBP</option>
+              <select
+                value={preferences.currency}
+                onChange={(e) =>
+                  save({ ...preferences, currency: e.target.value })
+                }
+                disabled={saving}
+                className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
+              >
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
               </select>
             </div>
 
             <div className="flex items-center justify-between py-4 border-b border-border">
               <div>
                 <p className="font-semibold text-foreground">Theme</p>
-                <p className="text-sm text-muted-foreground">Dark Mode</p>
+                <p className="text-sm text-muted-foreground">
+                  {mode === 'system' ? 'Follows your system preference' : mode === 'dark' ? 'Dark mode enabled' : 'Light mode enabled'}
+                </p>
               </div>
-              <select className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary">
-                <option>Dark</option>
-                <option>Light</option>
-                <option>Auto</option>
+              <select
+                className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary"
+                value={mode}
+                onChange={(e) => setMode(e.target.value as 'light' | 'dark' | 'system')}
+              >
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="system">Auto</option>
               </select>
+              <ThemeToggle />
             </div>
 
             <div className="flex items-center justify-between py-4">
               <div>
                 <p className="font-semibold text-foreground">Language</p>
-                <p className="text-sm text-muted-foreground">English</p>
+                <p className="text-sm text-muted-foreground">{preferences.locale === 'en' ? 'English' : preferences.locale === 'es' ? 'Spanish' : preferences.locale === 'fr' ? 'French' : preferences.locale}</p>
               </div>
-              <select className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary">
-                <option>English</option>
-                <option>Spanish</option>
-                <option>French</option>
+              <select
+                value={preferences.locale}
+                onChange={(e) =>
+                  save({ ...preferences, locale: e.target.value })
+                }
+                disabled={saving}
+                className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
+              >
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
               </select>
             </div>
           </div>

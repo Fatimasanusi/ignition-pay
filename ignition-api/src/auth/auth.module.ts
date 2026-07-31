@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SessionModule } from '../session/session.module';
+import { SettingsModule } from '../settings/settings.module';
 import { AuthChallengeController } from './auth-challenge.controller';
 import { AuthVerifyController } from './auth-verify.controller';
 import { AuthLogoutController } from './auth-logout.controller';
@@ -31,6 +32,7 @@ import { PermissionsGuard } from './permissions/permissions.guard';
     }),
     PrismaModule,
     SessionModule,
+    SettingsModule,
   ],
   controllers: [
     AuthChallengeController,

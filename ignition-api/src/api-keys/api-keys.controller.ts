@@ -218,7 +218,10 @@ export class ApiKeysController {
         : 60_000,
     },
   })
-  @ApiOperation({ summary: 'Rotate an API key (create new, revoke old)' })
+  @ApiOperation({
+    summary:
+      'Rotate an API key without downtime (old key stays active during grace period)',
+  })
   @ApiResponse({ status: 200, description: 'API key rotated successfully' })
   @ApiResponse({ status: 404, description: 'API key not found' })
   async rotate(
@@ -236,10 +239,27 @@ export class ApiKeysController {
       throw new NotFoundException('API key not found');
     }
 
+    if (!existingKey.isActive) {
+      throw new ConflictException('Cannot rotate a revoked API key');
+    }
+
+    // Check if this key is already in rotation
+    if (
+      existingKey.rotationExpiresAt &&
+      existingKey.rotationExpiresAt > new Date()
+    ) {
+      throw new ConflictException(
+        'This API key is already in rotation. Finalize or cancel the existing rotation first.',
+      );
+    }
+
     // Generate new key
     const rawKey = `sk_${randomBytes(32).toString('hex')}`;
     const prefix = rawKey.slice(0, 12);
     const keyHash = createHash('sha256').update(rawKey).digest('hex');
+
+    // Set rotation grace period to 7 days
+    const rotationExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     // Create new key with same metadata
     const newApiKey = await this.prisma.apiKey.create({
@@ -252,10 +272,27 @@ export class ApiKeysController {
       },
     });
 
-    // Revoke old key
+    // Mark old key as being rotated (keep it active during grace period)
     await this.prisma.apiKey.update({
       where: { id },
-      data: { isActive: false },
+      data: {
+        rotationOfId: newApiKey.id,
+        rotationExpiresAt,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: req.user.sub,
+        action: 'ADMIN_ACTION',
+        resourceType: 'ApiKey',
+        resourceId: id,
+        details: JSON.stringify({
+          action: 'API_KEY_ROTATION_STARTED',
+          newKeyId: newApiKey.id,
+          rotationExpiresAt: rotationExpiresAt.toISOString(),
+        }),
+      },
     });
 
     // Return the new raw key only once
@@ -265,6 +302,147 @@ export class ApiKeysController {
       prefix: newApiKey.prefix,
       scope: newApiKey.scope,
       createdAt: newApiKey.createdAt,
+      rotationExpiresAt,
+      message:
+        'Old key remains active for 7 days. Use POST /api-keys/:id/rotate/finalize to complete rotation early, or POST /api-keys/:id/rotate/cancel to cancel.',
+    };
+  }
+
+  @Post(':id/rotate/finalize')
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
+  @ApiOperation({
+    summary: 'Finalize key rotation (immediately revoke the old key)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Rotation finalized, old key revoked',
+  })
+  @ApiResponse({ status: 404, description: 'API key not found' })
+  async finalizeRotation(
+    @Param('id') id: string,
+    @Req() req: Request & { user: JwtUser },
+  ) {
+    const existingKey = await this.prisma.apiKey.findFirst({
+      where: {
+        id,
+        userId: req.user.sub,
+      },
+    });
+
+    if (!existingKey) {
+      throw new NotFoundException('API key not found');
+    }
+
+    if (!existingKey.rotationOfId || !existingKey.rotationExpiresAt) {
+      throw new ConflictException('This API key is not in rotation');
+    }
+
+    // Revoke the old key
+    await this.prisma.apiKey.update({
+      where: { id },
+      data: {
+        isActive: false,
+        rotationExpiresAt: new Date(), // Mark as finalized now
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: req.user.sub,
+        action: 'ADMIN_ACTION',
+        resourceType: 'ApiKey',
+        resourceId: id,
+        details: JSON.stringify({
+          action: 'API_KEY_ROTATION_FINALIZED',
+          newKeyId: existingKey.rotationOfId,
+        }),
+      },
+    });
+
+    return {
+      message: 'Rotation finalized. Old key has been revoked.',
+      newKeyId: existingKey.rotationOfId,
+    };
+  }
+
+  @Post(':id/rotate/cancel')
+  @Throttle({
+    strict: {
+      limit: process.env.THROTTLE_STRICT_LIMIT
+        ? Number(process.env.THROTTLE_STRICT_LIMIT)
+        : 5,
+      ttl: process.env.THROTTLE_STRICT_TTL
+        ? Number(process.env.THROTTLE_STRICT_TTL)
+        : 60_000,
+    },
+  })
+  @ApiOperation({
+    summary: 'Cancel key rotation (revoke the new key, keep old key active)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Rotation cancelled, new key revoked',
+  })
+  @ApiResponse({ status: 404, description: 'API key not found' })
+  async cancelRotation(
+    @Param('id') id: string,
+    @Req() req: Request & { user: JwtUser },
+  ) {
+    const existingKey = await this.prisma.apiKey.findFirst({
+      where: {
+        id,
+        userId: req.user.sub,
+      },
+    });
+
+    if (!existingKey) {
+      throw new NotFoundException('API key not found');
+    }
+
+    if (!existingKey.rotationOfId || !existingKey.rotationExpiresAt) {
+      throw new ConflictException('This API key is not in rotation');
+    }
+
+    // Revoke the new key
+    await this.prisma.apiKey.update({
+      where: { id: existingKey.rotationOfId },
+      data: { isActive: false },
+    });
+
+    // Clear rotation fields on the old key
+    await this.prisma.apiKey.update({
+      where: { id },
+      data: {
+        rotationOfId: null,
+        rotationExpiresAt: null,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: req.user.sub,
+        action: 'ADMIN_ACTION',
+        resourceType: 'ApiKey',
+        resourceId: id,
+        details: JSON.stringify({
+          action: 'API_KEY_ROTATION_CANCELLED',
+          revokedKeyId: existingKey.rotationOfId,
+        }),
+      },
+    });
+
+    return {
+      message:
+        'Rotation cancelled. New key has been revoked, old key remains active.',
     };
   }
 

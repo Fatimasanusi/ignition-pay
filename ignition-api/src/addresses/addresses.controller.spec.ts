@@ -16,6 +16,9 @@ describe('AddressesController', () => {
       | 'generate'
       | 'listByWallet'
       | 'verifyAddress'
+      | 'generateMemo'
+      | 'validateMemo'
+      | 'resolveDeposit'
     >
   >;
 
@@ -30,6 +33,9 @@ describe('AddressesController', () => {
       generate: jest.fn(),
       listByWallet: jest.fn(),
       verifyAddress: jest.fn(),
+      generateMemo: jest.fn(),
+      validateMemo: jest.fn(),
+      resolveDeposit: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -155,5 +161,28 @@ describe('AddressesController', () => {
       // controller.verify is synchronous; if it doesn't throw, NestJS sends 200
       expect(() => controller.verify({ address: 'BAD' })).not.toThrow();
     });
+  it('generateMemo() should call addressesService.generateMemo', async () => {
+    const req = { user: { sub: 'user-123' } };
+    const dto = { walletId: 'w-123', memoType: 'id' as any };
+    service.generateMemo.mockResolvedValue({ memoValue: '123' } as any);
+    const res = await controller.generateMemo(req, dto);
+    expect(service.generateMemo).toHaveBeenCalledWith('user-123', dto);
+    expect(res).toEqual({ memoValue: '123' });
+  });
+
+  it('validateMemo() should call addressesService.validateMemo', async () => {
+    const dto = { memoType: 'text', memoValue: 'note' };
+    service.validateMemo.mockResolvedValue({ valid: true } as any);
+    const res = await controller.validateMemo(dto);
+    expect(service.validateMemo).toHaveBeenCalledWith(dto);
+    expect(res).toEqual({ valid: true });
+  });
+
+  it('resolveDeposit() should call addressesService.resolveDeposit', async () => {
+    const dto = { destination: 'G123', memoType: 'id', memoValue: '123' };
+    service.resolveDeposit.mockResolvedValue({ routed: true } as any);
+    const res = await controller.resolveDeposit(dto);
+    expect(service.resolveDeposit).toHaveBeenCalledWith(dto);
+    expect(res).toEqual({ routed: true });
   });
 });

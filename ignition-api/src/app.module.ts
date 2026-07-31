@@ -22,6 +22,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { UsersModule } from './users/users.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { PaymentsModule } from './payments/payments.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { SessionModule } from './session/session.module';
 import { AddressesModule } from './addresses/addresses.module';
@@ -30,6 +31,10 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { SentryMiddleware } from './common/sentry/sentry.middleware';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
+import { NotificationsModule } from './notifications/notifications.module';
+import { Sep24Module } from './sep24/sep24.module';
+import { SettingsModule } from './settings/settings.module';
+import { Sep38Module } from './sep38/sep38.module';
 
 @Module({
   imports: [
@@ -50,8 +55,13 @@ import { ApiKeyExpirationService } from './api-keys/api-key-expiration.service';
     UsersModule,
     WalletsModule,
     TransactionsModule,
+    PaymentsModule,
     AddressesModule,
     AnalyticsModule,
+    NotificationsModule,
+    Sep24Module,
+    SettingsModule,
+    Sep38Module,
   ],
   controllers: [AppController],
   providers: [

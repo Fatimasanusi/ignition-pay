@@ -56,6 +56,15 @@ export const API_ENDPOINTS = {
     root: '/api-keys',
     byId: (id: string) => `/api-keys/${id}`,
   },
+  sep24: {
+    initiate: '/sep24/initiate',
+    status: '/sep24/status',
+    transaction: (id: string) => `/sep24/transactions/${id}`,
+    history: '/sep24/history',
+  },
+  sep38: {
+    quote: '/sep38/quote',
+  },
   health: {
     root: '/health',
     ready: '/health/ready',

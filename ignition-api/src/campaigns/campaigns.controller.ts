@@ -18,12 +18,12 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiParam,
 } from '@nestjs/swagger';
 import { Request } from 'express';
-import { JwtAuthGuard } from '../users/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../auth/permissions/permissions.guard';
-import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
-import { Permission } from '../auth/permissions/permissions.map';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
+import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 import { CampaignsService } from './campaigns.service';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
@@ -42,9 +42,9 @@ export class CampaignsController {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Post()
-  @RequirePermissions(Permission.CAMPAIGN_CREATE)
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create a new campaign' })
   @ApiResponse({ status: 201, description: 'Campaign successfully created' })
@@ -56,9 +56,9 @@ export class CampaignsController {
     return this.campaignsService.createCampaign(userId, body);
   }
 
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch(':id')
-  @RequirePermissions(Permission.CAMPAIGN_UPDATE_OWN)
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update an existing campaign' })
   @ApiResponse({ status: 200, description: 'Campaign successfully updated' })
@@ -81,12 +81,58 @@ export class CampaignsController {
   }
 
   /**
+   * PATCH /campaigns/:campaignId/milestones/:milestoneId/complete
+   *
+   * Marks a milestone as COMPLETED.  If all milestones on the campaign are now
+   * complete, the campaign itself is also marked COMPLETED and a notification
+   * is dispatched to the creator.
+   *
+   * Authorization: campaign creator only (enforced in the service layer).
+   */
+  @Patch(':campaignId/milestones/:milestoneId/complete')
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('write')
+  @ApiBearerAuth('JWT-auth')
+  @ApiParam({ name: 'campaignId', description: 'Campaign UUID' })
+  @ApiParam({ name: 'milestoneId', description: 'Milestone UUID' })
+  @ApiOperation({
+    summary: 'Complete a milestone',
+    description:
+      'Marks the milestone COMPLETED. If all milestones are now done the ' +
+      'campaign is also marked COMPLETED and notifications are sent.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Milestone (and optionally campaign) marked completed',
+    schema: {
+      type: 'object',
+      properties: {
+        milestone: { type: 'object' },
+        campaignCompleted: { type: 'boolean' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Milestone already completed or failed' })
+  @ApiResponse({ status: 403, description: 'Only the campaign creator can complete milestones' })
+  @ApiResponse({ status: 404, description: 'Campaign or milestone not found' })
+  async completeMilestone(
+    @Param('campaignId') campaignId: string,
+    @Param('milestoneId') milestoneId: string,
+    @Req() req: Request & { user: any },
+  ) {
+    const userId = req.user?.sub as string;
+    return this.campaignsService.completeMilestone(userId, campaignId, milestoneId);
+  }
+
+  /**
    * GET /campaigns
    * Browse public campaigns with pagination, filtering, and sorting
    * Query params: page, limit, category, status, search, sortBy
    * Cached for 30 seconds
    */
   @Get()
+  @UseGuards(ApiKeyGuard, ApiKeyScopeGuard)
+  @RequireScope('read')
   @ApiOperation({
     summary: 'Browse public campaigns with filtering and sorting',
   })

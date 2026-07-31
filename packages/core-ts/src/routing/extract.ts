@@ -2,7 +2,7 @@ import { RoutingInput, RoutingResult } from "./types";
 import { Warning } from "../address/types";
 import { parse } from "../address/parse";
 import { AddressParseError } from "../address/errors";
-import { normalizeMemoTextId } from "./memo";
+import { normalizeMemoTextId, validateMemoHash, validateMemoText } from "./memo";
 import { resolveFlags } from "./flags";
 
 export class ExtractRoutingError extends Error {
@@ -163,19 +163,27 @@ function extractRoutingStable(input: RoutingInput): RoutingResult {
       routingId = norm.normalized;
       routingSource = "memo";
       warnings.push(...norm.warnings);
+    } else if (validateMemoText(input.memoValue)) {
+      routingId = input.memoValue;
+      routingSource = "memo";
     } else {
       warnings.push({
         code: "MEMO_TEXT_UNROUTABLE",
         severity: "warn",
-        message: "MEMO_TEXT was not a valid numeric uint64.",
+        message: "MEMO_TEXT was not valid for routing (must be <= 28 UTF-8 bytes).",
       });
     }
-  } else if (input.memoType === "hash" || input.memoType === "return") {
-    warnings.push({
-      code: "MEMO_TEXT_UNROUTABLE",
-      severity: "warn",
-      message: `Memo type ${input.memoType} is not supported for routing.`,
-    });
+  } else if ((input.memoType === "hash" || input.memoType === "return") && input.memoValue) {
+    if (validateMemoHash(input.memoValue)) {
+      routingId = input.memoValue.toLowerCase();
+      routingSource = "memo";
+    } else {
+      warnings.push({
+        code: "MEMO_TEXT_UNROUTABLE",
+        severity: "warn",
+        message: `MEMO_${input.memoType.toUpperCase()} was not a valid 32-byte hex hash.`,
+      });
+    }
   } else if (input.memoType !== "none") {
     warnings.push({
       code: "MEMO_TEXT_UNROUTABLE",

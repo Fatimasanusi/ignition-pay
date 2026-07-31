@@ -153,6 +153,19 @@ export class UsersService {
       }
     }
 
+    if (updateDto.notificationPreferences) {
+      try {
+        const notifPrefs = JSON.parse(updateDto.notificationPreferences);
+        const existingPrefs = (updateData.preferences ?? {}) as Record<string, unknown>;
+        updateData.preferences = {
+          ...existingPrefs,
+          notifications: notifPrefs,
+        } as Prisma.InputJsonValue;
+      } catch {
+        throw new BadRequestException('Invalid notificationPreferences JSON');
+      }
+    }
+
     if (updateDto.socialLinks) {
       try {
         updateData.socialLinks = JSON.parse(
