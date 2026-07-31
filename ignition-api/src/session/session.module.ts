@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
@@ -9,10 +9,12 @@ import { SessionController } from './session.controller';
 // PermissionsService, so we re-export it from the auth permissions module
 // to keep the session module self-contained.
 import { PermissionsService } from '../auth/permissions/permissions.service';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
     ConfigModule,
+    forwardRef(() => SettingsModule), // Handle circular dependency
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
