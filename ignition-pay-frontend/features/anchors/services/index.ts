@@ -10,6 +10,8 @@ import type {
   Sep24TransactionStatus,
   AnchorHistoryQuery,
   AnchorHistoryResponse,
+  QuoteRequest,
+  QuoteResponse,
 } from '@/features/anchors/models'
 
 function apiBaseUrl(): string {
@@ -101,6 +103,29 @@ export const SEP24_STATUS_VARIANTS: Record<string, string> = {
 
 export function isSep24Terminal(status: string): boolean {
   return ['completed', 'no_market', 'too_small', 'too_large', 'expired', 'error'].includes(status)
+}
+
+export async function fetchQuote(
+  req: QuoteRequest,
+  signal?: AbortSignal,
+): Promise<QuoteResponse> {
+  const url = `${apiBaseUrl()}${API_PREFIX}/sep38/quote`
+  const timeout = AbortSignal.timeout(TIMEOUT.default)
+  const composed = signal ? AbortSignal.any([signal, timeout]) : timeout
+
+  const response = await fetch(url, {
+    method: 'POST',
+    signal: composed,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => 'Unknown error')
+    throw new Error(`Failed to get SEP-38 quote: ${errorBody}`)
+  }
+
+  return response.json()
 }
 
 export async function fetchAnchorHistory(

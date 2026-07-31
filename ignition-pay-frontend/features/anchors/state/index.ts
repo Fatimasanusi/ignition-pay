@@ -7,8 +7,9 @@ import type {
   AnchorHistoryQuery,
   AnchorHistoryResponse,
   AnchorHistoryItem,
+  QuoteResponse,
 } from '@/features/anchors/models'
-import { initiateSep24, pollSep24Status, isSep24Terminal, fetchAnchorHistory } from '@/features/anchors/services'
+import { initiateSep24, pollSep24Status, isSep24Terminal, fetchAnchorHistory, fetchQuote } from '@/features/anchors/services'
 import { trackEvent } from '@/lib/analytics'
 
 const POLL_INTERVAL_MS = 3000
@@ -24,6 +25,7 @@ const INITIAL_STATE: Sep24WizardState = {
   anchorTxId: null,
   interactiveUrl: null,
   status: null,
+  quote: null,
   error: null,
   isSubmitting: false,
 }
@@ -82,9 +84,41 @@ export function useSep24Wizard() {
     setState((prev) => ({ ...prev, assetIssuer: issuer }))
   }, [])
 
-  const submit = useCallback(
+  const fetchQuoteForAmount = useCallback(
+    async () => {
+      if (!state.operation || !state.amount || parseFloat(state.amount) <= 0) return
+
+      setState((prev) => ({ ...prev, isSubmitting: true, error: null }))
+
+      try {
+        const buyAsset = state.assetCode === 'USDC' ? 'USDC' : 'USDC'
+        const quote = await fetchQuote({
+          anchorName: state.anchorName,
+          sellAsset: state.assetCode,
+          buyAsset,
+          sellAmount: parseFloat(state.amount),
+        })
+
+        setState((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          step: 'quote',
+          quote,
+        }))
+      } catch (err: any) {
+        setState((prev) => ({
+          ...prev,
+          isSubmitting: false,
+          error: err?.message ?? 'Failed to get quote',
+        }))
+      }
+    },
+    [state.operation, state.anchorName, state.assetCode, state.amount],
+  )
+
+  const confirmQuote = useCallback(
     async (stellarAccount: string) => {
-      if (!state.operation) return
+      if (!state.operation || !state.quote) return
 
       setState((prev) => ({ ...prev, isSubmitting: true, error: null }))
 
@@ -96,6 +130,7 @@ export function useSep24Wizard() {
       trackEvent(analyticsEvent, {
         anchor: state.anchorName,
         asset: state.assetCode,
+        quoteId: state.quote.id,
       })
 
       try {
@@ -133,7 +168,7 @@ export function useSep24Wizard() {
         }))
       }
     },
-    [state.operation, state.anchorName, state.assetCode, state.assetIssuer, state.amount],
+    [state.operation, state.anchorName, state.assetCode, state.assetIssuer, state.amount, state.quote],
   )
 
   const startPolling = useCallback(
@@ -175,6 +210,7 @@ export function useSep24Wizard() {
       anchorTxId: null,
       interactiveUrl: null,
       status: null,
+      quote: null,
       error: null,
     }))
   }, [clearPolling])
@@ -187,7 +223,8 @@ export function useSep24Wizard() {
     setAssetCode,
     setAssetIssuer,
     setAmount,
-    submit,
+    fetchQuoteForAmount,
+    confirmQuote,
     reset,
   }
 }

@@ -58,6 +58,7 @@ export interface Sep24TransactionStatus {
 export type Sep24WizardStep =
   | 'operation'
   | 'form'
+  | 'quote'
   | 'interactive'
   | 'tracking'
   | 'completed'
@@ -75,6 +76,7 @@ export interface Sep24WizardState {
   anchorTxId: string | null
   interactiveUrl: string | null
   status: Sep24TransactionStatus | null
+  quote: QuoteResponse | null
   error: string | null
   isSubmitting: boolean
 }
@@ -111,4 +113,28 @@ export interface AnchorHistoryQuery {
   limit?: number
   operation?: 'deposit' | 'withdraw'
   anchorName?: string
+}
+
+// ---------------------------------------------------------------------------
+// SEP-38 Quote / RFQ
+// ---------------------------------------------------------------------------
+
+export interface QuoteRequest {
+  anchorName: string
+  sellAsset: string
+  buyAsset: string
+  sellAmount: number
+}
+
+export interface QuoteResponse {
+  id: string
+  price: string
+  totalPrice: string
+  sellAmount: string
+  buyAmount: string
+  sellAsset: string
+  buyAsset: string
+  fee?: { total: string; asset: string }
+  expiresAt: string
+  createdAt: string
 }
