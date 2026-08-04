@@ -10,6 +10,9 @@ describe('UpdateUserDto', () => {
     expect(errors.find((e: any) => e.property === 'preferences')).toBeDefined();
   });
 
+
+  
+
   it('rejects oversized preferences JSON', async () => {
     const dto = new UpdateUserDto();
     (dto as any).preferences = '"' + 'a'.repeat(6000) + '"';
