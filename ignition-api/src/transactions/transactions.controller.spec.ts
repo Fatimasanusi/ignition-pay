@@ -6,7 +6,6 @@ import { PermissionsService } from '../auth/permissions/permissions.service';
 import { ApiKeyGuard } from '../api-keys/api-key.guard';
 import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
 
-// Override guards so the controller tests don't need a live PrismaService.
 const allowAllGuard = { canActivate: (_ctx: ExecutionContext) => true };
 
 describe('TransactionsController', () => {
