@@ -7,9 +7,6 @@ import { Prisma } from '@prisma/client';
 // ── Helper factories ──────────────────────────────────────────────────────────
 
 const makeDonation = (overrides: any = {}) => ({
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const makeTransaction = (overrides: any = {}) => ({
   id: 'txn-1',
