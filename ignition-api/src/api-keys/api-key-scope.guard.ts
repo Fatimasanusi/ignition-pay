@@ -68,8 +68,12 @@ export class ApiKeyScopeGuard implements CanActivate {
 
     const user = request.user;
 
+    const requiredScopeDescription = requiredScopes.join(' or ');
+
     if (!user || !user.scope) {
-      throw new ForbiddenException('API key scope information is missing');
+      throw new ForbiddenException(
+        `API key is missing a scope. Required: ${requiredScopeDescription}.`,
+      );
     }
 
     const keyScope = user.scope as ApiKeyScope;
@@ -82,7 +86,7 @@ export class ApiKeyScopeGuard implements CanActivate {
     if (!hasRequiredScope) {
       throw new ForbiddenException(
         `API key scope '${keyScope}' is insufficient. ` +
-          `Required: ${requiredScopes.join(' or ')}.`,
+          `Required: ${requiredScopeDescription}.`,
       );
     }
 
