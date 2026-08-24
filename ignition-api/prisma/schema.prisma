@@ -511,6 +511,8 @@ model Sep24Transaction {
   amount          Decimal?  @db.Decimal(20, 7)
   anchorTxId      String?   @map("anchor_tx_id")
   interactiveUrl  String?   @map("interactive_url")
+  callbackToken   String?   @map("callback_token") @unique
+  lastCallbackAt  DateTime? @map("last_callback_at")
   status          String    @default("incomplete")
   statusDesc      String?   @map("status_desc")
   stellarTxHash   String?   @map("stellar_tx_hash")
