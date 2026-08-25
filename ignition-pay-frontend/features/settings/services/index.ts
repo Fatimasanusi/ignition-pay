@@ -1,7 +1,7 @@
 import { API_ENDPOINTS, API_PREFIX, API_BASE_URLS } from '@/lib/constants'
 import type { UserPreferences } from '../models'
 
-const getApiBase = (): string => {
+export const getApiBase = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL
   return API_BASE_URLS.development
 }
