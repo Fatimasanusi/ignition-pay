@@ -74,6 +74,36 @@ export class NotificationsService {
     return notification;
   }
 
+  /**
+   * Persist many notification rows in a single query.
+   *
+   * Fan-out to many recipients previously meant one sequential `create()`
+   * round-trip per notification (O(n) DB calls); this batches them into a
+   * single `createMany` insert so the cost is one round-trip regardless of
+   * how many notifications are emitted (issue #442).
+   */
+  async createMany(paramsList: CreateNotificationParams[]) {
+    if (paramsList.length === 0) {
+      return { count: 0 };
+    }
+
+    const result = await this.prisma.notification.createMany({
+      data: paramsList.map((params) => ({
+        userId: params.userId,
+        type: params.type,
+        title: params.title,
+        message: params.message,
+        relatedId: params.relatedId,
+      })),
+    });
+
+    this.logger.log(
+      `Notifications batched: ${result.count} row(s) in a single insert`,
+    );
+
+    return result;
+  }
+
   /** Return all unread notifications for a user, newest first. */
   async findUnread(userId: string) {
     return this.prisma.notification.findMany({

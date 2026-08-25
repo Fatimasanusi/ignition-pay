@@ -44,6 +44,7 @@ const mockPrisma = {
 
 const mockNotifications = {
   create: jest.fn(),
+  createMany: jest.fn(),
 };
 
 const mockConfig = {
@@ -82,7 +83,7 @@ describe('StellarSseConsumerService', () => {
     expect(service).toBeDefined();
   });
 
-  it('watchAddress() skips already-watched addresses', async () => {
+   it('watchAddress() skips already-watched addresses', async () => {
     // Register the address once so it appears in controllers map
     const address = 'GADDRESS1';
     // Manually insert into the controllers map to simulate a live watcher
@@ -91,6 +92,20 @@ describe('StellarSseConsumerService', () => {
     const streamSpy = jest.spyOn(service as any, 'streamPayments');
     await service.watchAddress(address);
     expect(streamSpy).not.toHaveBeenCalled();
+  });
+
+  it('watchAddress() restarts a watcher whose controller is already aborted', async () => {
+    const address = 'GDEADWATCHER';
+    // Simulate a watcher whose loop died without cleaning up the map entry.
+    const deadController = new AbortController();
+    deadController.abort();
+    (service as any).controllers.set(address, deadController);
+
+    const streamSpy = jest.spyOn(service as any, 'streamPayments');
+    await service.watchAddress(address);
+
+    // A fresh stream loop should be (re)started even though a stale entry exists.
+    expect(streamSpy).toHaveBeenCalledWith(address);
   });
 
   it('stopWatching() aborts the controller and removes the entry', () => {
@@ -145,11 +160,13 @@ describe('StellarSseConsumerService', () => {
 
       await (service as any).dispatchDomainEvents(address, record);
 
-      expect(mockNotifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: NotificationType.DONATION_RECEIVED,
-          relatedId: 'c1',
-        }),
+      expect(mockNotifications.createMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: NotificationType.DONATION_RECEIVED,
+            relatedId: 'c1',
+          }),
+        ]),
       );
     });
 
@@ -179,11 +196,13 @@ describe('StellarSseConsumerService', () => {
 
       await (service as any).dispatchDomainEvents(address, record);
 
-      expect(mockNotifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: NotificationType.MILESTONE_REACHED,
-          relatedId: 'm1',
-        }),
+      expect(mockNotifications.createMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: NotificationType.MILESTONE_REACHED,
+            relatedId: 'm1',
+          }),
+        ]),
       );
       expect(mockPrisma.milestone.update).toHaveBeenCalledWith({
         where: { id: 'm1' },
@@ -216,11 +235,12 @@ describe('StellarSseConsumerService', () => {
 
       await (service as any).dispatchDomainEvents(address, record);
 
-      const milestoneCall = mockNotifications.create.mock.calls.find(
-        ([p]: [{ type: NotificationType }]) =>
-          p.type === NotificationType.MILESTONE_REACHED,
+      const batched: Array<{ type: NotificationType }> =
+        mockNotifications.createMany.mock.calls.flatMap(([list]) => list);
+      const milestoneNotification = batched.find(
+        (p) => p.type === NotificationType.MILESTONE_REACHED,
       );
-      expect(milestoneCall).toBeUndefined();
+      expect(milestoneNotification).toBeUndefined();
     });
 
     it('creates CAMPAIGN_COMPLETED when goalAmount is met', async () => {
@@ -244,11 +264,13 @@ describe('StellarSseConsumerService', () => {
 
       await (service as any).dispatchDomainEvents(address, record);
 
-      expect(mockNotifications.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: NotificationType.CAMPAIGN_COMPLETED,
-          relatedId: 'c1',
-        }),
+      expect(mockNotifications.createMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: NotificationType.CAMPAIGN_COMPLETED,
+            relatedId: 'c1',
+          }),
+        ]),
       );
       expect(mockPrisma.campaign.update).toHaveBeenCalledWith({
         where: { id: 'c1' },
@@ -262,6 +284,7 @@ describe('StellarSseConsumerService', () => {
       await (service as any).dispatchDomainEvents(address, record);
 
       expect(mockNotifications.create).not.toHaveBeenCalled();
+      expect(mockNotifications.createMany).not.toHaveBeenCalled();
     });
   });
 
