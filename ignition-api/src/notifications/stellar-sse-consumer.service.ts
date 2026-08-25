@@ -28,7 +28,10 @@ import { NotificationType } from '@prisma/client';
 import Keyv from 'keyv';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { NotificationsService } from './notifications.service';
+import {
+  CreateNotificationParams,
+  NotificationsService,
+} from './notifications.service';
 
 /** Operation type values returned by Horizon. */
 enum HorizonOpType {
@@ -399,9 +402,14 @@ export class StellarSseConsumerService
       },
     });
 
+    // Accumulate every notification emitted while walking the campaigns so
+    // they can be flushed in a single batched insert instead of one
+    // sequential round-trip per notification (issue #442).
+    const notificationsToCreate: CreateNotificationParams[] = [];
+
     for (const campaign of campaigns) {
       // ── DONATION_RECEIVED ─────────────────────────────────────────────
-      await this.notifications.create({
+      notificationsToCreate.push({
         userId: wallet.userId,
         type: NotificationType.DONATION_RECEIVED,
         title: 'Donation received',
@@ -458,7 +466,7 @@ export class StellarSseConsumerService
       // ── MILESTONE_REACHED ──────────────────────────────────────────────
       for (const milestoneId of completedMilestoneIds) {
         const milestone = campaign.milestones.find((m) => m.id === milestoneId);
-        await this.notifications.create({
+        notificationsToCreate.push({
           userId: wallet.userId,
           type: NotificationType.MILESTONE_REACHED,
           title: 'Milestone reached',
@@ -469,7 +477,7 @@ export class StellarSseConsumerService
 
       // ── CAMPAIGN_COMPLETED ─────────────────────────────────────────────
       if (campaignCompleted) {
-        await this.notifications.create({
+        notificationsToCreate.push({
           userId: wallet.userId,
           type: NotificationType.CAMPAIGN_COMPLETED,
           title: 'Campaign completed',
@@ -478,6 +486,9 @@ export class StellarSseConsumerService
         });
       }
     }
+
+    // Flush all accumulated notifications in a single batched insert.
+    await this.notifications.createMany(notificationsToCreate);
 
     this.logger.log(
       `Processed Horizon payment ${record.transaction_hash} → address ${walletAddress}`,

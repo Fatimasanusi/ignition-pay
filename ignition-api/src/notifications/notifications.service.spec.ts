@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const mockPrisma = {
   notification: {
     create: jest.fn(),
+    createMany: jest.fn(),
     findMany: jest.fn(),
     updateMany: jest.fn(),
   },
@@ -58,6 +59,55 @@ describe('NotificationsService', () => {
       },
     });
     expect(result).toEqual(expected);
+  });
+
+  it('createMany() batches many notifications into a single insert', async () => {
+    mockPrisma.notification.createMany.mockResolvedValue({ count: 2 });
+
+    const result = await service.createMany([
+      {
+        userId: 'u1',
+        type: NotificationType.DONATION_RECEIVED,
+        title: 'Donation received',
+        message: 'Your campaign received 10 XLM.',
+        relatedId: 'c1',
+      },
+      {
+        userId: 'u1',
+        type: NotificationType.MILESTONE_REACHED,
+        title: 'Milestone reached',
+        message: 'Milestone "Phase 1" has been reached!',
+        relatedId: 'm1',
+      },
+    ]);
+
+    expect(mockPrisma.notification.createMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.notification.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'u1',
+          type: NotificationType.DONATION_RECEIVED,
+          title: 'Donation received',
+          message: 'Your campaign received 10 XLM.',
+          relatedId: 'c1',
+        },
+        {
+          userId: 'u1',
+          type: NotificationType.MILESTONE_REACHED,
+          title: 'Milestone reached',
+          message: 'Milestone "Phase 1" has been reached!',
+          relatedId: 'm1',
+        },
+      ],
+    });
+    expect(result).toEqual({ count: 2 });
+  });
+
+  it('createMany() short-circuits without querying when given no notifications', async () => {
+    const result = await service.createMany([]);
+
+    expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+    expect(result).toEqual({ count: 0 });
   });
 
   it('findUnread() returns unread notifications ordered newest-first', async () => {
