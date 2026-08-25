@@ -82,7 +82,7 @@ describe('StellarSseConsumerService', () => {
     expect(service).toBeDefined();
   });
 
-  it('watchAddress() skips already-watched addresses', async () => {
+   it('watchAddress() skips already-watched addresses', async () => {
     // Register the address once so it appears in controllers map
     const address = 'GADDRESS1';
     // Manually insert into the controllers map to simulate a live watcher
@@ -91,6 +91,20 @@ describe('StellarSseConsumerService', () => {
     const streamSpy = jest.spyOn(service as any, 'streamPayments');
     await service.watchAddress(address);
     expect(streamSpy).not.toHaveBeenCalled();
+  });
+
+  it('watchAddress() restarts a watcher whose controller is already aborted', async () => {
+    const address = 'GDEADWATCHER';
+    // Simulate a watcher whose loop died without cleaning up the map entry.
+    const deadController = new AbortController();
+    deadController.abort();
+    (service as any).controllers.set(address, deadController);
+
+    const streamSpy = jest.spyOn(service as any, 'streamPayments');
+    await service.watchAddress(address);
+
+    // A fresh stream loop should be (re)started even though a stale entry exists.
+    expect(streamSpy).toHaveBeenCalledWith(address);
   });
 
   it('stopWatching() aborts the controller and removes the entry', () => {

@@ -49,6 +49,24 @@ interface HorizonPaymentRecord {
   asset_code?: string;
 }
 
+/**
+ * Combine several abort signals into one.  The returned signal aborts as soon as
+ * *any* of the inputs aborts.  Used to merge the shutdown signal with a
+ * connection idle watchdog so a dead connection can be torn down independently
+ * of (and without being mistaken for) a graceful shutdown.
+ */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort();
+      break;
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  return controller.signal;
+}
+
 /** Redis key for the last seen paging cursor per Stellar address. */
 const CURSOR_KEY = (address: string) => `horizon:cursor:${address}`;
 
@@ -60,6 +78,21 @@ const DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** How long to wait before reconnecting after an SSE error (ms). */
 const RECONNECT_DELAY_MS = 5_000;
+
+/**
+ * Upper bound for the reconnect backoff.  Prevents an exponential reconnect
+ * storm from hammering Horizon when it (or the network) is unhealthy.
+ */
+const MAX_RECONNECT_DELAY_MS = 60_000;
+
+/**
+ * If no bytes are received from Horizon within this window, the connection is
+ * assumed dead (e.g. a half-open TCP socket after a network drop) and is force
+ * torn down so the consumer reconnects.  Horizon does not emit periodic
+ * keep-alives, so this must be comfortably larger than the expected gap between
+ * legitimate payments.
+ */
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 @Injectable()
 export class StellarSseConsumerService
@@ -107,7 +140,11 @@ export class StellarSseConsumerService
    * register newly-created wallets without a restart.
    */
   async watchAddress(address: string): Promise<void> {
-    if (this.controllers.has(address)) return; // already watching
+    const existing = this.controllers.get(address);
+    // Already watching with a live connection — nothing to do.
+    if (existing && !existing.signal.aborted) return;
+    // No watcher, or the previous one died without cleaning up — (re)start it.
+    this.controllers.delete(address);
     this.logger.log(`Starting SSE watcher for address ${address}`);
     void this.streamPayments(address); // run in background
   }
@@ -147,24 +184,30 @@ export class StellarSseConsumerService
 
   /**
    * Long-running loop that maintains a persistent SSE connection to Horizon
-   * for one Stellar address.  Reconnects automatically after errors.
+   * for one Stellar address.  Reconnects automatically after errors or a dead
+   * connection, with exponential backoff that resets once data flows again.
    */
   private async streamPayments(address: string): Promise<void> {
+    let backoff = RECONNECT_DELAY_MS;
+
     while (true) {
       const controller = new AbortController();
       this.controllers.set(address, controller);
 
       try {
-        await this.consumeStream(address, controller.signal);
+        await this.consumeStream(address, controller, () => {
+          // Data received → connection is healthy, reset the backoff.
+          backoff = RECONNECT_DELAY_MS;
+        });
       } catch (err: unknown) {
         if (controller.signal.aborted) {
-          // Graceful shutdown — exit the loop.
+          // Graceful shutdown / explicit stop — leave the loop.
           this.controllers.delete(address);
           return;
         }
         this.logger.warn(
           `SSE stream error for ${address}: ${(err as Error).message}. ` +
-            `Reconnecting in ${RECONNECT_DELAY_MS / 1000}s …`,
+            `Reconnecting in ${backoff / 1000}s …`,
         );
       }
 
@@ -173,20 +216,35 @@ export class StellarSseConsumerService
         return;
       }
 
-      await this.delay(RECONNECT_DELAY_MS);
+      await this.delay(backoff);
+      // Exponential backoff capped at MAX_RECONNECT_DELAY_MS.
+      backoff = Math.min(backoff * 2, MAX_RECONNECT_DELAY_MS);
     }
   }
 
   /**
    * Attach to Horizon's payments SSE endpoint, parse events, and call
    * handlePayment() for each incoming operation.
+   *
+   * `controller` is the shutdown/stop controller owned by this watcher.  A
+   * separate idle watchdog controller is layered on top so that a connection
+   * which stops delivering data (without a clean close) is force-aborted and
+   * the caller reconnects.  `onActivity` is invoked whenever bytes arrive so
+   * the reconnect backoff can be reset.
    */
   private async consumeStream(
     address: string,
-    signal: AbortSignal,
+    controller: AbortController,
+    onActivity: () => void,
   ): Promise<void> {
     const cursor = await this.getCursor(address);
     const url = `${this.horizonUrl}/accounts/${encodeURIComponent(address)}/payments?cursor=${cursor}&order=asc&limit=100`;
+
+    // Merge the shutdown signal with an idle watchdog.  Aborting either one
+    // tears down the fetch; the caller distinguishes the two cases by checking
+    // `controller.signal.aborted` (shutdown) vs. the returned AbortError (idle).
+    const idleController = new AbortController();
+    const signal = anySignal([controller.signal, idleController.signal]);
 
     let response: Response;
     try {
@@ -212,10 +270,29 @@ export class StellarSseConsumerService
     const decoder = new TextDecoder();
     let buffer = '';
 
+    // Idle watchdog: if no data arrives within the window, abort the idle
+    // controller so reader.read() rejects and we fall through to a reconnect.
+    let idleTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      this.logger.warn(
+        `No data received from Horizon for ${address} in ` +
+          `${STREAM_IDLE_TIMEOUT_MS / 1000}s — forcing reconnect`,
+      );
+      idleController.abort();
+    }, STREAM_IDLE_TIMEOUT_MS);
+
+    const armIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => idleController.abort(), STREAM_IDLE_TIMEOUT_MS);
+    };
+
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
+        // Any bytes received → connection is alive; reset watchdog + backoff.
+        armIdleTimer();
+        onActivity();
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -240,7 +317,15 @@ export class StellarSseConsumerService
           }
         }
       }
+    } catch (err: unknown) {
+      if ((err as Error).name === 'AbortError') {
+        // Triggered by the idle watchdog or a shutdown — let the caller decide
+        // whether to exit or reconnect based on `controller.signal.aborted`.
+        return;
+      }
+      throw err;
     } finally {
+      clearTimeout(idleTimer);
       reader.releaseLock();
     }
   }
