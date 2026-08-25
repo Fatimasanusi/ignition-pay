@@ -57,7 +57,8 @@ jest.mock('@stellar/stellar-sdk', () => {
 });
 
 import { WalletsService } from './wallets.service';
-import { WalletNetwork } from './dto/create-wallet.dto';
+import { CreateWalletDto, WalletNetwork } from './dto/create-wallet.dto';
+import { DEFAULT_WALLET_LIMITS } from '../wallet/services/wallet-limit.service';
 
 const mockWallet = {
   id: 'wallet-uuid',
@@ -90,10 +91,18 @@ const buildMockPrisma = (
   },
 });
 
+const buildMockWalletLimitService = () => ({
+  resolveCreationLimits: jest.fn((dto: CreateWalletDto = {}) => ({
+    dailyLimit: dto.dailyLimit ?? DEFAULT_WALLET_LIMITS.dailyLimit,
+    monthlyLimit: dto.monthlyLimit ?? DEFAULT_WALLET_LIMITS.monthlyLimit,
+  })),
+});
+
 describe('WalletsService', () => {
   let service: WalletsService;
   let cache: Keyv;
   let prisma: ReturnType<typeof buildMockPrisma>;
+  let walletLimitService: ReturnType<typeof buildMockWalletLimitService>;
 
   beforeEach(() => {
     const config = new ConfigService({
@@ -102,8 +111,9 @@ describe('WalletsService', () => {
     });
     cache = new Keyv();
     prisma = buildMockPrisma();
+    walletLimitService = buildMockWalletLimitService();
     // @ts-ignore
-    service = new WalletsService(config, cache, prisma);
+    service = new WalletsService(config, cache, prisma, walletLimitService);
   });
 
   // ------- createWallet tests -------
@@ -116,6 +126,14 @@ describe('WalletsService', () => {
       expect(result.network).toBe('STELLAR');
       expect(result.dailyLimit).toBe(1000);
       expect(result.monthlyLimit).toBe(10000);
+      expect(walletLimitService.resolveCreationLimits).toHaveBeenCalledWith(
+        {},
+      );
+      expect(prisma.wallet.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining(DEFAULT_WALLET_LIMITS),
+        }),
+      );
     });
 
     it('creates a wallet with a provided valid deposit address', async () => {
@@ -136,12 +154,23 @@ describe('WalletsService', () => {
           }),
         }),
       );
+      expect(walletLimitService.resolveCreationLimits).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dailyLimit: 500,
+          monthlyLimit: 5000,
+        }),
+      );
     });
 
     it('throws NotFoundException if user does not exist', async () => {
       const noPrisma = buildMockPrisma({ user: null });
       // @ts-ignore
-      service = new WalletsService(new ConfigService(), cache, noPrisma);
+      service = new WalletsService(
+        new ConfigService(),
+        cache,
+        noPrisma,
+        walletLimitService,
+      );
       await expect(service.createWallet('bad-user', {})).rejects.toThrow(
         NotFoundException,
       );
@@ -158,7 +187,12 @@ describe('WalletsService', () => {
     it('throws ConflictException if deposit address is already taken', async () => {
       const conflictPrisma = buildMockPrisma({ wallet: mockWallet });
       // @ts-ignore
-      service = new WalletsService(new ConfigService(), cache, conflictPrisma);
+      service = new WalletsService(
+        new ConfigService(),
+        cache,
+        conflictPrisma,
+        walletLimitService,
+      );
       await expect(
         service.createWallet('user-uuid', {
           depositAddress:
