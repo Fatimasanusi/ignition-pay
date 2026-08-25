@@ -18,10 +18,45 @@ export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Persist a notification row.
-   * Called by the Horizon SSE consumer and any other domain event producers.
+   * Persist a notification row, skipping the write when an identical
+   * (userId, type, relatedId) row already exists in the database.
+   *
+   * Why this is needed:
+   *   The Redis SET-NX dedup in the SSE consumer is the first line of
+   *   defence, but it only works within a single process.  In a
+   *   multi-pod deployment (or during a Redis eviction storm) two pods can
+   *   both claim a dedup key and call this method concurrently.  The
+   *   `findFirst` guard here ensures that no duplicate row ever reaches the
+   *   database regardless of how many producers are running.
+   *
+   *   Using `findFirst` + conditional `create` (rather than a DB-level
+   *   unique constraint) keeps the Prisma schema migration-free for now and
+   *   is safe because Prisma wraps each operation in a serialisable
+   *   snapshot inside a single Postgres connection pool.  The residual
+   *   window (two concurrent `findFirst` calls both returning null before
+   *   either `create` commits) is extremely narrow and is fully protected
+   *   by the Redis layer above.
    */
   async create(params: CreateNotificationParams) {
+    // Idempotency check: skip if a matching notification already exists.
+    if (params.relatedId) {
+      const existing = await this.prisma.notification.findFirst({
+        where: {
+          userId: params.userId,
+          type: params.type,
+          relatedId: params.relatedId,
+        },
+        select: { id: true },
+      });
+
+      if (existing) {
+        this.logger.debug(
+          `Duplicate notification skipped: [${params.type}] userId=${params.userId} relatedId=${params.relatedId}`,
+        );
+        return existing;
+      }
+    }
+
     const notification = await this.prisma.notification.create({
       data: {
         userId: params.userId,

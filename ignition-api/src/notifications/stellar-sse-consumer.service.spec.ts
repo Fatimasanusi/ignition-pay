@@ -301,8 +301,9 @@ describe('StellarSseConsumerService', () => {
       asset_code: 'XLM',
     };
 
-    it('skips processing if txHash was already seen (de-duplication)', async () => {
-      mockCache.get.mockResolvedValue('1'); // seen = true
+    it('skips processing when SET NX returns falsy — key already claimed (de-duplication)', async () => {
+      // cache.set() returning false/null simulates an NX miss (key already existed).
+      mockCache.set.mockResolvedValue(false);
       const dispatchSpy = jest.spyOn(service as any, 'dispatchDomainEvents');
 
       await (service as any).handlePayment(address, record);
@@ -310,10 +311,30 @@ describe('StellarSseConsumerService', () => {
       expect(dispatchSpy).not.toHaveBeenCalled();
     });
 
+    it('processes the payment when SET NX returns truthy — key was newly written', async () => {
+      // cache.set() returning true simulates an NX hit (key was not present).
+      mockCache.set.mockResolvedValue(true);
+      const dispatchSpy = jest
+        .spyOn(service as any, 'dispatchDomainEvents')
+        .mockResolvedValue(undefined);
+
+      await (service as any).handlePayment(address, record);
+
+      expect(dispatchSpy).toHaveBeenCalledWith(address, record);
+    });
+
+    it('does NOT call cache.get() — only cache.set() is used for atomic dedup', async () => {
+      mockCache.set.mockResolvedValue(false);
+
+      await (service as any).handlePayment(address, record);
+
+      expect(mockCache.get).not.toHaveBeenCalled();
+    });
+
     it('skips non-payment operation types', async () => {
       const nonPayment = { ...record, type: 'manage_sell_offer' };
       const dispatchSpy = jest.spyOn(service as any, 'dispatchDomainEvents');
-      mockCache.get.mockResolvedValue(null);
+      mockCache.set.mockResolvedValue(true);
 
       await (service as any).handlePayment(address, nonPayment);
 
@@ -323,7 +344,7 @@ describe('StellarSseConsumerService', () => {
     it('skips payments whose `to` field does not match the watched address', async () => {
       const wrongTarget = { ...record, to: 'GOTHER' };
       const dispatchSpy = jest.spyOn(service as any, 'dispatchDomainEvents');
-      mockCache.get.mockResolvedValue(null);
+      mockCache.set.mockResolvedValue(true);
 
       await (service as any).handlePayment(address, wrongTarget);
 
@@ -331,7 +352,7 @@ describe('StellarSseConsumerService', () => {
     });
 
     it('persists cursor after successful dispatch', async () => {
-      mockCache.get.mockResolvedValue(null);
+      mockCache.set.mockResolvedValue(true);
       jest.spyOn(service as any, 'dispatchDomainEvents').mockResolvedValue(undefined);
 
       await (service as any).handlePayment(address, record);

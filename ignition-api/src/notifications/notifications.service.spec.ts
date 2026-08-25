@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const mockPrisma = {
   notification: {
     create: jest.fn(),
+    findFirst: jest.fn(),
     createMany: jest.fn(),
     findMany: jest.fn(),
     updateMany: jest.fn(),
@@ -27,38 +28,91 @@ describe('NotificationsService', () => {
     jest.clearAllMocks();
   });
 
-  it('create() persists a notification row', async () => {
-    const expected = {
-      id: 'n1',
-      userId: 'u1',
-      type: NotificationType.DONATION_RECEIVED,
-      title: 'Donation received',
-      message: 'Your campaign received 10 XLM.',
-      relatedId: 'c1',
-      isRead: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    mockPrisma.notification.create.mockResolvedValue(expected);
-
-    const result = await service.create({
-      userId: 'u1',
-      type: NotificationType.DONATION_RECEIVED,
-      title: 'Donation received',
-      message: 'Your campaign received 10 XLM.',
-      relatedId: 'c1',
-    });
-
-    expect(mockPrisma.notification.create).toHaveBeenCalledWith({
-      data: {
+  describe('create()', () => {
+    it('persists a notification row when no duplicate exists', async () => {
+      const expected = {
+        id: 'n1',
         userId: 'u1',
         type: NotificationType.DONATION_RECEIVED,
         title: 'Donation received',
         message: 'Your campaign received 10 XLM.',
         relatedId: 'c1',
-      },
+        isRead: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockPrisma.notification.findFirst.mockResolvedValue(null); // no duplicate
+      mockPrisma.notification.create.mockResolvedValue(expected);
+
+      const result = await service.create({
+        userId: 'u1',
+        type: NotificationType.DONATION_RECEIVED,
+        title: 'Donation received',
+        message: 'Your campaign received 10 XLM.',
+        relatedId: 'c1',
+      });
+
+      expect(mockPrisma.notification.findFirst).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          type: NotificationType.DONATION_RECEIVED,
+          relatedId: 'c1',
+        },
+        select: { id: true },
+      });
+      expect(mockPrisma.notification.create).toHaveBeenCalledWith({
+        data: {
+          userId: 'u1',
+          type: NotificationType.DONATION_RECEIVED,
+          title: 'Donation received',
+          message: 'Your campaign received 10 XLM.',
+          relatedId: 'c1',
+        },
+      });
+      expect(result).toEqual(expected);
     });
-    expect(result).toEqual(expected);
+
+    it('skips the DB write and returns the existing row when a duplicate exists', async () => {
+      const existing = { id: 'n-existing' };
+      mockPrisma.notification.findFirst.mockResolvedValue(existing);
+
+      const result = await service.create({
+        userId: 'u1',
+        type: NotificationType.DONATION_RECEIVED,
+        title: 'Donation received',
+        message: 'Your campaign received 10 XLM.',
+        relatedId: 'c1',
+      });
+
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+      expect(result).toEqual(existing);
+    });
+
+    it('skips the idempotency check (and always creates) when relatedId is absent', async () => {
+      const expected = {
+        id: 'n2',
+        userId: 'u1',
+        type: NotificationType.DONATION_RECEIVED,
+        title: 'Generic alert',
+        message: 'No related resource.',
+        relatedId: undefined,
+        isRead: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      mockPrisma.notification.create.mockResolvedValue(expected);
+
+      await service.create({
+        userId: 'u1',
+        type: NotificationType.DONATION_RECEIVED,
+        title: 'Generic alert',
+        message: 'No related resource.',
+      });
+
+      // findFirst should NOT be called because relatedId is absent
+      expect(mockPrisma.notification.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.create).toHaveBeenCalled();
+    });
   });
 
   it('createMany() batches many notifications into a single insert', async () => {
