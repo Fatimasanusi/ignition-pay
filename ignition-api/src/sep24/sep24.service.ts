@@ -1,16 +1,28 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { randomBytes } from 'crypto'
-import { PrismaService } from '../prisma/prisma.service'
-import { InitiateSep24Dto, Sep24Operation, GetSep24HistoryQueryDto } from './dto/initiate-sep24.dto'
-import type { Sep24HistoryItemDto, Sep24HistoryResponseDto } from './dto/sep24-response.dto'
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
+import {
+  InitiateSep24Dto,
+  Sep24Operation,
+  GetSep24HistoryQueryDto,
+} from './dto/initiate-sep24.dto';
+import type {
+  Sep24HistoryItemDto,
+  Sep24HistoryResponseDto,
+} from './dto/sep24-response.dto';
 
 const ANCHOR_CONFIGS: Record<string, { domain: string; sep10?: string }> = {
   StellarX: { domain: 'https://api.stellarx.com' },
   AnchorUSD: { domain: 'https://api.anchorusd.com' },
   GateHub: { domain: 'https://api.gatehub.com' },
   PayMunk: { domain: 'https://api.paymunk.com' },
-}
+};
 
 const SEP_24_DEPOSIT_STATUSES = [
   'incomplete',
@@ -26,10 +38,10 @@ const SEP_24_DEPOSIT_STATUSES = [
   'too_large',
   'expired',
   'error',
-] as const
+] as const;
 
 function isValidSep24Status(status: string): boolean {
-  return SEP_24_DEPOSIT_STATUSES.includes(status as any)
+  return SEP_24_DEPOSIT_STATUSES.includes(status as any);
 }
 
 @Injectable()
@@ -45,9 +57,9 @@ export class Sep24Service {
    * which case the flow falls back to synchronous polling (see getStatus).
    */
   private buildCallbackUrl(token: string): string | null {
-    const base = this.config.get<string>('PUBLIC_BASE_URL', '')?.trim()
-    if (!base) return null
-    return `${base.replace(/\/$/, '')}/sep24/callback/${token}`
+    const base = this.config.get<string>('PUBLIC_BASE_URL', '')?.trim();
+    if (!base) return null;
+    return `${base.replace(/\/$/, '')}/sep24/callback/${token}`;
   }
 
   /**
@@ -55,71 +67,147 @@ export class Sep24Service {
    * unauthenticated webhook callback (anchors cannot present a JWT).
    */
   private generateCallbackToken(): string {
-    return randomBytes(32).toString('hex')
+    return randomBytes(32).toString('hex');
   }
 
   private getAnchorConfig(anchorName: string): { domain: string } {
-    const config = ANCHOR_CONFIGS[anchorName]
+    const config = ANCHOR_CONFIGS[anchorName];
     if (!config) {
-      throw new NotFoundException(`Unknown anchor: ${anchorName}`)
+      throw new NotFoundException(`Unknown anchor: ${anchorName}`);
     }
-    return config
+    return config;
   }
 
-  async initiate(req: InitiateSep24Dto, userId: string): Promise<{
-    id: string
-    anchorTxId: string
-    interactiveUrl: string
-    status: string
-    statusDesc?: string
-    moreInfoUrl?: string
-    startedAt: Date
+  async initiate(
+    req: InitiateSep24Dto,
+    userId: string,
+  ): Promise<{
+    id: string;
+    anchorTxId: string;
+    interactiveUrl: string;
+    status: string;
+    statusDesc?: string;
+    moreInfoUrl?: string;
+    startedAt: Date;
   }> {
-    const config = this.getAnchorConfig(req.anchorName)
+    const config = this.getAnchorConfig(req.anchorName);
+
+    const transactionId = req.transactionId ?? req.transaction_id;
+    let existingRecord: any = null;
+
+    if (transactionId) {
+      existingRecord = await this.prisma.sep24Transaction.findFirst({
+        where: {
+          OR: [{ id: transactionId }, { anchorTxId: transactionId }],
+        },
+      });
+
+      if (!existingRecord) {
+        throw new NotFoundException('SEP-24 transaction not found');
+      }
+
+      // Issue #425 — Ensure authenticated caller owns the transaction before returning interactive URL
+      if (existingRecord.userId !== userId) {
+        throw new ForbiddenException(
+          'You do not have permission to access this transaction',
+        );
+      }
+
+      if (
+        existingRecord.anchorName !== req.anchorName ||
+        existingRecord.operation !== req.operation
+      ) {
+        throw new BadRequestException(
+          'Transaction operation or anchor mismatch',
+        );
+      }
+    }
 
     const endpoint =
       req.operation === Sep24Operation.DEPOSIT
         ? '/transactions/deposit/interactive'
-        : '/transactions/withdraw/interactive'
+        : '/transactions/withdraw/interactive';
 
-    const callbackToken = this.generateCallbackToken()
-    const callbackUrl = this.buildCallbackUrl(callbackToken)
+    const callbackToken =
+      existingRecord?.callbackToken ?? this.generateCallbackToken();
+    const callbackUrl = this.buildCallbackUrl(callbackToken);
 
     const body: Record<string, any> = {
       asset_code: req.assetCode,
       account: req.stellarAccount,
+    };
+    if (req.assetIssuer) body.asset_issuer = req.assetIssuer;
+    if (req.amount != null) body.amount = req.amount.toString();
+    if (transactionId) {
+      body.transaction_id = existingRecord?.anchorTxId ?? transactionId;
     }
-    if (req.assetIssuer) body.asset_issuer = req.assetIssuer
-    if (req.amount != null) body.amount = req.amount.toString()
     // Issue #427 — give the anchor our webhook so it can push status updates
     // asynchronously instead of relying on the client to long-poll it.
-    if (callbackUrl) body.callback = callbackUrl
+    if (callbackUrl) body.callback = callbackUrl;
 
-    const url = `${config.domain}${endpoint}`
+    const url = `${config.domain}${endpoint}`;
 
-    let anchorResponse: any
+    let anchorResponse: any;
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      })
+      });
       if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error')
+        const errorText = await response.text().catch(() => 'Unknown error');
         throw new BadRequestException(
           `Anchor returned ${response.status}: ${errorText}`,
-        )
+        );
       }
-      anchorResponse = await response.json()
+      anchorResponse = await response.json();
     } catch (err: any) {
-      if (err instanceof BadRequestException) throw err
+      if (err instanceof BadRequestException) throw err;
       // If the real anchor is unreachable, simulate a response for development
-      anchorResponse = this.simulateAnchorResponse(req, config.domain)
+      anchorResponse = this.simulateAnchorResponse(
+        req,
+        config.domain,
+        existingRecord?.anchorTxId ?? transactionId,
+      );
     }
 
-    const anchorTxId: string = anchorResponse.id ?? `sim-${Date.now()}`
+    const anchorTxId: string =
+      anchorResponse.id ?? existingRecord?.anchorTxId ?? `sim-${Date.now()}`;
     const interactiveUrl: string =
-      anchorResponse.url ?? `${config.domain}/sep24/interactive/${anchorTxId}`
+      anchorResponse.url ?? `${config.domain}/sep24/interactive/${anchorTxId}`;
+
+    if (existingRecord) {
+      const updated = await this.prisma.sep24Transaction.update({
+        where: { id: existingRecord.id },
+        data: {
+          anchorTxId,
+          interactiveUrl,
+          rawAnchorResponse: anchorResponse,
+          status:
+            anchorResponse.status && isValidSep24Status(anchorResponse.status)
+              ? anchorResponse.status
+              : existingRecord.status,
+          statusDesc:
+            anchorResponse.statusDescription ?? existingRecord.statusDesc,
+          moreInfoUrl:
+            anchorResponse.more_info_url ?? existingRecord.moreInfoUrl,
+        },
+      });
+
+      return {
+        id: updated.id,
+        anchorTxId,
+        interactiveUrl,
+        status: updated.status,
+        statusDesc:
+          anchorResponse.statusDescription ??
+          updated.statusDesc ??
+          'Awaiting user interaction with the anchor',
+        moreInfoUrl:
+          anchorResponse.more_info_url ?? updated.moreInfoUrl ?? undefined,
+        startedAt: updated.startedAt,
+      };
+    }
 
     const record = await this.prisma.sep24Transaction.create({
       data: {
@@ -136,7 +224,7 @@ export class Sep24Service {
         status: 'incomplete',
         rawAnchorResponse: anchorResponse,
       },
-    })
+    });
 
     return {
       id: record.id,
@@ -145,75 +233,85 @@ export class Sep24Service {
       status: 'incomplete',
       statusDesc: 'Awaiting user interaction with the anchor',
       startedAt: record.startedAt,
-    }
+    };
   }
 
   async getStatus(
     txId: string,
+    userId?: string,
   ): Promise<{
-    id: string
-    anchorTxId: string
-    status: string
-    statusDesc?: string
-    moreInfoUrl?: string
-    stellarTxHash?: string
-    externalTxId?: string
-    message?: string
-    amountIn?: string
-    amountOut?: string
-    feeDetails?: Record<string, unknown>
-    startedAt: Date
-    completedAt?: Date
+    id: string;
+    anchorTxId: string;
+    status: string;
+    statusDesc?: string;
+    moreInfoUrl?: string;
+    stellarTxHash?: string;
+    externalTxId?: string;
+    message?: string;
+    amountIn?: string;
+    amountOut?: string;
+    feeDetails?: Record<string, unknown>;
+    startedAt: Date;
+    completedAt?: Date;
   }> {
     const record = await this.prisma.sep24Transaction.findUnique({
       where: { id: txId },
-    })
+    });
     if (!record) {
-      throw new NotFoundException('SEP-24 transaction not found')
+      throw new NotFoundException('SEP-24 transaction not found');
     }
 
-    const config = this.getAnchorConfig(record.anchorName)
+    // Issue #425 — Validate transaction ownership if userId is provided
+    if (userId && record.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to access this transaction',
+      );
+    }
+
+    const config = this.getAnchorConfig(record.anchorName);
 
     // Issue #427 — when async callbacks are flowing, the locally stored
     // status is the source of truth and we must NOT block on a synchronous
     // anchor poll (which is what previously timed out under long-polling).
     // We only fall back to the blocking poll when no webhook has ever
     // arrived for this transaction (e.g. dev simulation / legacy anchors).
-    const asyncTrackingActive = record.lastCallbackAt != null
+    const asyncTrackingActive = record.lastCallbackAt != null;
 
-    let anchorStatus: any
+    let anchorStatus: any;
     if (!asyncTrackingActive) {
       try {
         const response = await fetch(
           `${config.domain}/transactions/${record.anchorTxId}`,
           { headers: { Accept: 'application/json' } },
-        )
+        );
         if (response.ok) {
-          const data = await response.json()
-          anchorStatus = data.transaction ?? data
+          const data = await response.json();
+          anchorStatus = data.transaction ?? data;
         }
       } catch {
         // Simulate status progression for development
-        anchorStatus = this.simulateStatusUpdate(record)
+        anchorStatus = this.simulateStatusUpdate(record);
       }
     }
 
-    const status = anchorStatus?.status ?? record.status
-    const normalizedStatus = isValidSep24Status(status) ? status : record.status
+    const status = anchorStatus?.status ?? record.status;
+    const normalizedStatus = isValidSep24Status(status)
+      ? status
+      : record.status;
 
     if (anchorStatus && normalizedStatus !== record.status) {
-      const updateData: any = { status: normalizedStatus }
+      const updateData: any = { status: normalizedStatus };
       if (normalizedStatus === 'completed') {
-        updateData.completedAt = new Date()
+        updateData.completedAt = new Date();
       }
       if (anchorStatus?.stellar_transaction_hash) {
-        updateData.stellarTxHash = anchorStatus.stellar_transaction_hash
+        updateData.stellarTxHash = anchorStatus.stellar_transaction_hash;
       }
       if (anchorStatus?.more_info_url) {
-        updateData.moreInfoUrl = anchorStatus.more_info_url
+        updateData.moreInfoUrl = anchorStatus.more_info_url;
       }
       if (anchorStatus?.message) {
-        updateData.message = anchorStatus.message
+        updateData.message = anchorStatus.message;
       }
       await this.prisma.sep24Transaction.update({
         where: { id: txId },
@@ -221,13 +319,13 @@ export class Sep24Service {
           ...updateData,
           rawAnchorResponse: anchorStatus,
         },
-      })
+      });
     }
 
     // When async tracking is active, anchorStatus is null; fall back to the
     // last webhook payload (rawAnchorResponse) so amounts/fees/etc. that the
     // anchor only sends via the callback are still surfaced.
-    const src: any = anchorStatus ?? record.rawAnchorResponse ?? {}
+    const src: any = anchorStatus ?? record.rawAnchorResponse ?? {};
 
     return {
       id: record.id,
@@ -247,17 +345,26 @@ export class Sep24Service {
       feeDetails: src.fee_details ?? undefined,
       startedAt: record.startedAt,
       completedAt: record.completedAt ?? undefined,
-    }
+    };
   }
 
-  async findById(id: string): Promise<{ anchorName: string; anchorTxId: string }> {
+  async findById(
+    id: string,
+    userId?: string,
+  ): Promise<{ anchorName: string; anchorTxId: string }> {
     const record = await this.prisma.sep24Transaction.findUnique({
       where: { id },
-    })
+    });
     if (!record) {
-      throw new NotFoundException('SEP-24 transaction not found')
+      throw new NotFoundException('SEP-24 transaction not found');
     }
-    return { anchorName: record.anchorName, anchorTxId: record.anchorTxId! }
+    // Issue #425 — Validate transaction ownership if userId is provided
+    if (userId && record.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to access this transaction',
+      );
+    }
+    return { anchorName: record.anchorName, anchorTxId: record.anchorTxId! };
   }
 
   /**
@@ -278,45 +385,45 @@ export class Sep24Service {
   ): Promise<void> {
     const record = await this.prisma.sep24Transaction.findUnique({
       where: { callbackToken: token },
-    })
+    });
     if (!record) {
-      throw new NotFoundException('Unknown SEP-24 callback token')
+      throw new NotFoundException('Unknown SEP-24 callback token');
     }
 
     // The anchor's reported transaction id must match what we stored.
-    const reportedId = payload?.id ?? payload?.transaction?.id
+    const reportedId = payload?.id ?? payload?.transaction?.id;
     if (reportedId && record.anchorTxId && reportedId !== record.anchorTxId) {
-      throw new BadRequestException('Callback transaction id mismatch')
+      throw new BadRequestException('Callback transaction id mismatch');
     }
 
-    const status = payload?.status ?? payload?.transaction?.status
+    const status = payload?.status ?? payload?.transaction?.status;
     const normalizedStatus =
-      status && isValidSep24Status(status) ? status : record.status
+      status && isValidSep24Status(status) ? status : record.status;
 
     const updateData: any = {
       lastCallbackAt: new Date(),
-    }
+    };
     if (normalizedStatus !== record.status) {
-      updateData.status = normalizedStatus
+      updateData.status = normalizedStatus;
       if (normalizedStatus === 'completed') {
-        updateData.completedAt = new Date()
+        updateData.completedAt = new Date();
       }
     }
 
-    const tx = payload?.transaction ?? payload
+    const tx = payload?.transaction ?? payload;
     if (tx?.stellar_transaction_hash) {
-      updateData.stellarTxHash = tx.stellar_transaction_hash
+      updateData.stellarTxHash = tx.stellar_transaction_hash;
     }
     if (tx?.more_info_url) {
-      updateData.moreInfoUrl = tx.more_info_url
+      updateData.moreInfoUrl = tx.more_info_url;
     }
     if (tx?.message) {
-      updateData.message = tx.message
+      updateData.message = tx.message;
     }
     if (tx?.status_eta != null) {
-      updateData.statusDesc = `Estimated ${tx.status_eta}s to ${normalizedStatus}`
+      updateData.statusDesc = `Estimated ${tx.status_eta}s to ${normalizedStatus}`;
     } else if (tx?.statusDescription) {
-      updateData.statusDesc = tx.statusDescription
+      updateData.statusDesc = tx.statusDescription;
     }
     // amount_in/out, fee_details and external_transaction_id are not stored
     // as dedicated columns; they are preserved in rawAnchorResponse and
@@ -325,20 +432,20 @@ export class Sep24Service {
     await this.prisma.sep24Transaction.update({
       where: { id: record.id },
       data: { ...updateData, rawAnchorResponse: payload },
-    })
+    });
   }
 
   async getHistory(
     userId: string,
     query: GetSep24HistoryQueryDto,
   ): Promise<Sep24HistoryResponseDto> {
-    const page = Math.max(1, query.page ?? 1)
-    const limit = Math.min(100, Math.max(1, query.limit ?? 20))
-    const skip = (page - 1) * limit
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+    const skip = (page - 1) * limit;
 
-    const where: Record<string, any> = { userId }
-    if (query.operation) where.operation = query.operation
-    if (query.anchorName) where.anchorName = query.anchorName
+    const where: Record<string, any> = { userId };
+    if (query.operation) where.operation = query.operation;
+    if (query.anchorName) where.anchorName = query.anchorName;
 
     const [records, total] = await Promise.all([
       this.prisma.sep24Transaction.findMany({
@@ -363,7 +470,7 @@ export class Sep24Service {
         },
       }),
       this.prisma.sep24Transaction.count({ where }),
-    ])
+    ]);
 
     const items: Sep24HistoryItemDto[] = records.map((r) => ({
       id: r.id,
@@ -379,36 +486,48 @@ export class Sep24Service {
       moreInfoUrl: r.moreInfoUrl ?? undefined,
       startedAt: r.startedAt,
       completedAt: r.completedAt ?? undefined,
-    }))
+    }));
 
-    return { items, total, page, limit }
+    return { items, total, page, limit };
   }
 
   private simulateAnchorResponse(
     req: InitiateSep24Dto,
     _domain: string,
+    existingTxId?: string,
   ): any {
-    const txId = `sim-${Date.now()}`
+    const txId = existingTxId ?? `sim-${Date.now()}`;
     return {
       id: txId,
       url: `/sep24/interactive-simulator?txId=${txId}&operation=${req.operation}&asset=${req.assetCode}`,
       status: 'incomplete',
-      statusDescription: 'Interactive flow initiated',
-    }
+      statusDescription: existingTxId
+        ? 'Interactive flow resumed'
+        : 'Interactive flow initiated',
+    };
   }
 
   private simulateStatusUpdate(record: any): any {
-    const elapsed = Date.now() - new Date(record.startedAt).getTime()
-    const minutes = elapsed / 60000
+    const elapsed = Date.now() - new Date(record.startedAt).getTime();
+    const minutes = elapsed / 60000;
 
     if (minutes < 1) {
-      return { status: 'incomplete', statusDescription: 'User is completing the interactive flow' }
+      return {
+        status: 'incomplete',
+        statusDescription: 'User is completing the interactive flow',
+      };
     }
     if (minutes < 2) {
-      return { status: 'pending_anchor', statusDescription: 'Anchor is processing the transaction' }
+      return {
+        status: 'pending_anchor',
+        statusDescription: 'Anchor is processing the transaction',
+      };
     }
     if (minutes < 3) {
-      return { status: 'pending_stellar', statusDescription: 'Stellar transaction is being submitted' }
+      return {
+        status: 'pending_stellar',
+        statusDescription: 'Stellar transaction is being submitted',
+      };
     }
     return {
       status: 'completed',
@@ -417,6 +536,6 @@ export class Sep24Service {
       amount_in: record.amount?.toString(),
       amount_out: record.amount?.toString(),
       fee_details: { total: '0.00001', asset: 'XLM' },
-    }
+    };
   }
 }
