@@ -265,13 +265,17 @@ export class StellarSseConsumerService
     if (!relevantTypes.includes(record.type)) return;
     if (record.to !== watchedAddress) return;
 
-    // De-duplication: skip if we've already processed this tx
+    // Atomic SET NX de-duplication — replaces the previous get→set TOCTOU pattern.
+    //
+    // cache.set() with the Keyv interface returns `true` when the key was newly
+    // written and `false` (or a falsy value) when it already existed (NX semantics).
+    // This single atomic operation eliminates the race window that existed when a
+    // separate get() and set() were called sequentially: two concurrent consumers
+    // reconnecting after an SSE drop could both pass the old `if (seen) return`
+    // check before either had a chance to write the key.
     const dedupKey = DEDUP_KEY(record.transaction_hash);
-    const seen = await this.cache.get<string>(dedupKey);
-    if (seen) return;
-
-    // Mark as seen before any DB write to reduce the duplicate-write window
-    await this.cache.set(dedupKey, '1', DEDUP_TTL_MS);
+    const claimed = await this.cache.set(dedupKey, '1', DEDUP_TTL_MS);
+    if (!claimed) return; // another handler already owns this tx
 
     // Resolve the wallet → campaign → user chain
     await this.dispatchDomainEvents(watchedAddress, record);
