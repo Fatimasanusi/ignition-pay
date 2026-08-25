@@ -241,3 +241,34 @@ impl AccessControlContract {
         env.storage().instance().set(&"operators", &operators);
     }
 }
+
+
+#[contract]
+pub struct PausableContract;
+
+#[contractimpl]
+impl PausableContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&"admin") {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&"admin", &admin);
+        env.storage().instance().set(&"paused", &false);
+    }
+
+    pub fn is_paused(&self, env: &Env) -> bool {
+        env.storage().instance().get(&"paused").unwrap_or(false)
+    }
+
+    pub fn pause(&self, env: &Env) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        env.storage().instance().set(&"paused", &true);
+    }
+
+    pub fn unpause(&self, env: &Env) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        env.storage().instance().set(&"paused", &false);
+    }
+}
