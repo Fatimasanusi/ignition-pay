@@ -76,3 +76,71 @@ impl IgnitionPayContract {
         authorizations.contains(&user)
     }
 }
+
+#[contract]
+pub struct MultiOracleContract;
+
+#[contractimpl]
+impl MultiOracleContract {
+    pub fn initialize(env: Env, admin: Address, oracles: Vec<Address>) {
+        let admin_key = "admin";
+        let oracles_key = "oracles";
+
+        if env.storage().instance().has(&admin_key) {
+            panic!("Contract already initialized");
+        }
+
+        env.storage().instance().set(&admin_key, &admin);
+        env.storage().instance().set(&oracles_key, &oracles);
+        env.storage().instance().set(&"prices", &Map::<Symbol, Vec<u64>>::new(&env));
+    }
+
+    pub fn add_oracle(&self, env: &Env, new_oracle: Address) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut oracles: Vec<Address> = env.storage().instance().get(&"oracles").unwrap_or_else(|| Vec::new(env));
+        oracles.push_back(new_oracle);
+        env.storage().instance().set(&"oracles", &oracles);
+    }
+
+    pub fn remove_oracle(&self, env: &Env, oracle_to_remove: Address) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut oracles: Vec<Address> = env.storage().instance().get(&"oracles").unwrap_or_else(|| Vec::new(env));
+        if let Some(index) = oracles.iter().position(|o| o == oracle_to_remove) {
+            oracles.remove(index as u32);
+        }
+        env.storage().instance().set(&"oracles", &oracles);
+    }
+
+    pub fn push_price(&self, env: &Env, asset: Symbol, price: u64) {
+        let caller = env.invoker();
+        let oracles: Vec<Address> = env.storage().instance().get(&"oracles").unwrap_or_else(|| Vec::new(env));
+
+        if !oracles.contains(&caller) {
+            panic!("Caller is not a registered oracle");
+        }
+
+        let mut prices: Map<Symbol, Vec<u64>> = env.storage().instance().get(&"prices").unwrap_or_else(|| Map::new(env));
+        let mut asset_prices = prices.get(asset.clone()).unwrap_or_else(|| Vec::new(env));
+        
+        asset_prices.push_back(price);
+        prices.set(asset.clone(), asset_prices);
+        env.storage().instance().set(&"prices", &prices);
+    }
+
+    pub fn get_median_price(&self, env: &Env, asset: Symbol) -> u64 {
+        let prices: Map<Symbol, Vec<u64>> = env.storage().instance().get(&"prices").unwrap_or_else(|| Map::new(env));
+        let mut asset_prices = prices.get(asset.clone()).unwrap_or_else(|| panic!("No prices for asset"));
+
+        if asset_prices.is_empty() {
+            panic!("No prices available for this asset");
+        }
+
+        asset_prices.sort();
+        let mid = asset_prices.len() / 2;
+        asset_prices.get(mid).unwrap_or(0)
+    }
+}
