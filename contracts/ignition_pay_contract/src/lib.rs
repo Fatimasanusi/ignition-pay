@@ -1,5 +1,6 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map};
+use crate::MultiOracleContractClient;
 
 const MAX_CALLS_PER_LEDGER: u32 = 5;
 
@@ -142,5 +143,54 @@ impl MultiOracleContract {
         asset_prices.sort();
         let mid = asset_prices.len() / 2;
         asset_prices.get(mid).unwrap_or(0)
+    }
+}
+
+#[contract]
+pub struct PriceFeedContract;
+
+#[contractimpl]
+impl PriceFeedContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&"admin") {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&"admin", &admin);
+        env.storage().instance().set(&"providers", &Vec::<Address>::new(&env));
+    }
+
+    pub fn register_provider(&self, env: &Env, provider: Address) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut providers: Vec<Address> = env.storage().instance().get(&"providers").unwrap_or_else(|| Vec::new(env));
+        if providers.contains(&provider) {
+            panic!("Provider already registered");
+        }
+        providers.push_back(provider);
+        env.storage().instance().set(&"providers", &providers);
+    }
+
+    pub fn unregister_provider(&self, env: &Env, provider: Address) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut providers: Vec<Address> = env.storage().instance().get(&"providers").unwrap_or_else(|| Vec::new(env));
+        if let Some(index) = providers.iter().position(|p| p == provider) {
+            providers.remove(index as u32);
+        }
+        env.storage().instance().set(&"providers", &providers);
+    }
+
+    pub fn update_price(&self, env: &Env, multi_oracle_contract: Address, asset: Symbol, price: u64) {
+        let caller = env.invoker();
+        let providers: Vec<Address> = env.storage().instance().get(&"providers").unwrap_or_else(|| Vec::new(env));
+
+        if !providers.contains(&caller) {
+            panic!("Caller is not a registered provider");
+        }
+
+        let oracle_client = MultiOracleContractClient::new(env, &multi_oracle_contract);
+        oracle_client.push_price(&asset, &price);
     }
 }
