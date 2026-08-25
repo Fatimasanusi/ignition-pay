@@ -1,33 +1,43 @@
 import {
   Injectable,
-  UnprocessableEntityException,
   Logger,
+  UnprocessableEntityException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, In } from 'typeorm';
+import { TransactionStatus, type Wallet } from '@prisma/client';
 import BigNumber from 'bignumber.js';
-import { Wallet } from '../entities/wallet.entity';
-import {
-  Transaction,
-  TransactionStatus,
-  TransactionType,
-} from '../../transactions/entities/transaction.entity';
+import { PrismaService } from '../../prisma/prisma.service';
+
+export const DEFAULT_WALLET_LIMITS = {
+  dailyLimit: 1000,
+  monthlyLimit: 10000,
+} as const;
+
+type WalletLimitInput = {
+  dailyLimit?: number | null;
+  monthlyLimit?: number | null;
+};
 
 @Injectable()
 export class WalletLimitService {
   private readonly logger = new Logger(WalletLimitService.name);
 
-  constructor(
-    @InjectRepository(Transaction)
-    private readonly transactionRepository: Repository<Transaction>,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Enforces rolling 24-hour and 30-day outgoing transfer limits for a given wallet.
-   * Throws UnprocessableEntityException if the new transaction exceeds limits.
+   * Resolves wallet creation limits from request input plus platform defaults.
+   */
+  resolveCreationLimits(input: WalletLimitInput = {}) {
+    return {
+      dailyLimit: input.dailyLimit ?? DEFAULT_WALLET_LIMITS.dailyLimit,
+      monthlyLimit: input.monthlyLimit ?? DEFAULT_WALLET_LIMITS.monthlyLimit,
+    };
+  }
+
+  /**
+   * Enforces rolling 24-hour and 30-day outgoing transfer limits for a wallet.
    */
   async validateTransactionLimits(
-    wallet: Wallet,
+    wallet: Pick<Wallet, 'id' | 'dailyLimit' | 'monthlyLimit'>,
     outgoingAmountStr: string,
   ): Promise<void> {
     const outgoingAmount = new BigNumber(outgoingAmountStr);
@@ -40,77 +50,68 @@ export class WalletLimitService {
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    // 1. Evaluate Rolling 24-Hour Daily Limit
-    if (wallet.dailyLimit) {
-      const dailyLimitBN = new BigNumber(wallet.dailyLimit);
-
-      const dailySpentBN = await this.getSumOfOutgoingTransactions(
+    if (wallet.dailyLimit != null) {
+      const dailyLimit = new BigNumber(wallet.dailyLimit.toString());
+      const dailySpent = await this.getSumOfOutgoingTransactions(
         wallet.id,
         twentyFourHoursAgo,
         now,
       );
+      const projectedDailyTotal = dailySpent.plus(outgoingAmount);
 
-      const projectedDailyTotal = dailySpentBN.plus(outgoingAmount);
-
-      if (projectedDailyTotal.isGreaterThan(dailyLimitBN)) {
+      if (projectedDailyTotal.isGreaterThan(dailyLimit)) {
         this.logger.warn(
-          `Wallet ${wallet.id} exceeded daily limit. Limit: ${dailyLimitBN.toFixed(7)}, Rolling 24h Spent: ${dailySpentBN.toFixed(7)}, Attempted: ${outgoingAmount.toFixed(7)}`,
+          `Wallet ${wallet.id} exceeded daily limit. Limit: ${dailyLimit.toFixed(7)}, Rolling 24h Spent: ${dailySpent.toFixed(7)}, Attempted: ${outgoingAmount.toFixed(7)}`,
         );
 
         throw new UnprocessableEntityException(
-          `Transaction exceeds 24-hour rolling daily limit of ${dailyLimitBN.toFixed(2)} XLM. Remaining: ${BigNumber.max(0, dailyLimitBN.minus(dailySpentBN)).toFixed(2)} XLM.`,
+          `Transaction exceeds 24-hour rolling daily limit of ${dailyLimit.toFixed(2)} XLM. Remaining: ${BigNumber.max(0, dailyLimit.minus(dailySpent)).toFixed(2)} XLM.`,
         );
       }
     }
 
-    // 2. Evaluate Rolling 30-Day Monthly Limit
-    if (wallet.monthlyLimit) {
-      const monthlyLimitBN = new BigNumber(wallet.monthlyLimit);
-
-      const monthlySpentBN = await this.getSumOfOutgoingTransactions(
+    if (wallet.monthlyLimit != null) {
+      const monthlyLimit = new BigNumber(wallet.monthlyLimit.toString());
+      const monthlySpent = await this.getSumOfOutgoingTransactions(
         wallet.id,
         thirtyDaysAgo,
         now,
       );
+      const projectedMonthlyTotal = monthlySpent.plus(outgoingAmount);
 
-      const projectedMonthlyTotal = monthlySpentBN.plus(outgoingAmount);
-
-      if (projectedMonthlyTotal.isGreaterThan(monthlyLimitBN)) {
+      if (projectedMonthlyTotal.isGreaterThan(monthlyLimit)) {
         this.logger.warn(
-          `Wallet ${wallet.id} exceeded monthly limit. Limit: ${monthlyLimitBN.toFixed(7)}, Rolling 30d Spent: ${monthlySpentBN.toFixed(7)}, Attempted: ${outgoingAmount.toFixed(7)}`,
+          `Wallet ${wallet.id} exceeded monthly limit. Limit: ${monthlyLimit.toFixed(7)}, Rolling 30d Spent: ${monthlySpent.toFixed(7)}, Attempted: ${outgoingAmount.toFixed(7)}`,
         );
 
         throw new UnprocessableEntityException(
-          `Transaction exceeds 30-day rolling monthly limit of ${monthlyLimitBN.toFixed(2)} XLM. Remaining: ${BigNumber.max(0, monthlyLimitBN.minus(monthlySpentBN)).toFixed(2)} XLM.`,
+          `Transaction exceeds 30-day rolling monthly limit of ${monthlyLimit.toFixed(2)} XLM. Remaining: ${BigNumber.max(0, monthlyLimit.minus(monthlySpent)).toFixed(2)} XLM.`,
         );
       }
     }
   }
 
-  /**
-   * Sums all successful or pending outgoing transactions within a rolling date window.
-   */
   private async getSumOfOutgoingTransactions(
     walletId: string,
     fromDate: Date,
     toDate: Date,
   ): Promise<BigNumber> {
-    const result = await this.transactionRepository
-      .createQueryBuilder('tx')
-      .select('SUM(CAST(tx.amount AS DECIMAL))', 'totalSpent')
-      .where('tx.sourceWalletId = :walletId', { walletId })
-      .andWhere('tx.createdAt BETWEEN :fromDate AND :toDate', {
-        fromDate,
-        toDate,
-      })
-      .andWhere('tx.status IN (:...statuses)', {
-        statuses: [TransactionStatus.COMPLETED, TransactionStatus.PENDING],
-      })
-      .andWhere('tx.type IN (:...types)', {
-        types: [TransactionType.PAYMENT, TransactionType.WITHDRAWAL],
-      })
-      .getRawOne();
+    const result = await this.prisma.transaction.aggregate({
+      where: {
+        fromWalletId: walletId,
+        createdAt: {
+          gte: fromDate,
+          lte: toDate,
+        },
+        status: {
+          in: [TransactionStatus.COMPLETED, TransactionStatus.PENDING],
+        },
+      },
+      _sum: {
+        amount: true,
+      },
+    });
 
-    return new BigNumber(result?.totalSpent || '0');
+    return new BigNumber(result._sum.amount?.toString() ?? '0');
   }
 }

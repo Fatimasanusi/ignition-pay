@@ -12,6 +12,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWalletDto, WalletNetwork } from './dto/create-wallet.dto';
 import { WalletType } from '@prisma/client';
+import { WalletLimitService } from '../wallet/services/wallet-limit.service';
 
 @Injectable()
 export class WalletsService {
@@ -21,6 +22,7 @@ export class WalletsService {
     private readonly config: ConfigService,
     @Inject(CACHE_MANAGER) private cacheManager: Keyv,
     private readonly prisma: PrismaService,
+    private readonly walletLimitService: WalletLimitService,
   ) {
     this.horizonUrl =
       this.config.get<string>('STELLAR_HORIZON_URL') ??
@@ -41,6 +43,7 @@ export class WalletsService {
 
     const network = dto.network ?? WalletNetwork.STELLAR;
     const walletType = dto.walletType ?? WalletType.CUSTODIAL;
+    const limits = this.walletLimitService.resolveCreationLimits(dto);
 
     // NON_CUSTODIAL: user must supply their own public key / deposit address;
     // the server never generates or stores a secret key.
@@ -80,8 +83,8 @@ export class WalletsService {
         depositAddress,
         walletType,
         label: dto.label ?? null,
-        dailyLimit: dto.dailyLimit ?? 1000,
-        monthlyLimit: dto.monthlyLimit ?? 10000,
+        dailyLimit: limits.dailyLimit,
+        monthlyLimit: limits.monthlyLimit,
       },
     });
 

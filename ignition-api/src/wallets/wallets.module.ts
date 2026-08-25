@@ -10,6 +10,7 @@ import { PermissionsGuard } from '../auth/permissions/permissions.guard';
 import { ApiKeyGuard } from '../api-keys/api-key.guard';
 import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
 import { ApiKeyExpirationService } from '../api-keys/api-key-expiration.service';
+import { WalletLimitService } from '../wallet/services/wallet-limit.service';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ApiKeyExpirationService } from '../api-keys/api-key-expiration.service'
     ApiKeyGuard,
     ApiKeyScopeGuard,
     ApiKeyExpirationService,
+    WalletLimitService,
   ],
 })
 export class WalletsModule {}
