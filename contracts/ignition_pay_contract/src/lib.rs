@@ -12,6 +12,7 @@ impl IgnitionPayContract {
         env.storage().instance().set(&"admin", &admin);
         env.storage().instance().set(&"authorizations", &Vec::<Address>::new(&env));
         env.storage().instance().set(&"rate_limit", &Map::<Address, (u32, u32)>::new(&env));
+        env.storage().instance().set(&"kyc_status", &Map::<Address, bool>::new(&env));
     }
 
     fn check_rate_limit(&self, env: &Env, user: &Address) {
@@ -32,11 +33,25 @@ impl IgnitionPayContract {
         env.storage().instance().set(&"rate_limit", &rate_limit);
     }
 
+    pub fn set_kyc_status(&self, env: &Env, user: &Address, kyc_completed: bool) {
+        let admin = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut kyc_status: Map<Address, bool> = env.storage().instance().get(&"kyc_status").unwrap_or_else(|| Map::new(env));
+        kyc_status.set(user.clone(), kyc_completed);
+        env.storage().instance().set(&"kyc_status", &kyc_status);
+    }
+
     pub fn authorize(env: Env, user: Address) {
         let admin = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
         admin.require_auth();
 
         self.check_rate_limit(&env, &admin);
+
+        let kyc_status: Map<Address, bool> = env.storage().instance().get(&"kyc_status").unwrap_or_else(|| Map::new(&env));
+        if !kyc_status.get(user.clone()).unwrap_or(false) {
+            panic!("KYC not completed");
+        }
 
         let mut authorizations: Vec<Address> = env.storage().instance().get(&"authorizations").unwrap_or_else(|| Vec::new(&env));
         authorizations.push_back(user);
