@@ -194,3 +194,50 @@ impl PriceFeedContract {
         oracle_client.push_price(&asset, &price);
     }
 }
+
+#[contract]
+pub struct AccessControlContract;
+
+#[contractimpl]
+impl AccessControlContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&"admin") {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&"admin", &admin);
+        env.storage().instance().set(&"operators", &Vec::<Address>::new(&env));
+    }
+
+    pub fn has_admin_role(&self, env: &Env, user: &Address) -> bool {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        &admin == user
+    }
+
+    pub fn has_operator_role(&self, env: &Env, user: &Address) -> bool {
+        let operators: Vec<Address> = env.storage().instance().get(&"operators").unwrap_or_else(|| Vec::new(env));
+        operators.contains(user)
+    }
+
+    pub fn add_operator(&self, env: &Env, operator: Address) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut operators: Vec<Address> = env.storage().instance().get(&"operators").unwrap_or_else(|| Vec::new(env));
+        if operators.contains(&operator) {
+            panic!("Operator already exists");
+        }
+        operators.push_back(operator);
+        env.storage().instance().set(&"operators", &operators);
+    }
+
+    pub fn remove_operator(&self, env: &Env, operator: Address) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut operators: Vec<Address> = env.storage().instance().get(&"operators").unwrap_or_else(|| Vec::new(env));
+        if let Some(index) = operators.iter().position(|o| o == operator) {
+            operators.remove(index as u32);
+        }
+        env.storage().instance().set(&"operators", &operators);
+    }
+}
