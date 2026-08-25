@@ -29,16 +29,30 @@ const DEAD_LETTER_SETTINGS = {
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        redis: config.get<string>('REDIS_URL', 'redis://localhost:6379'),
-      }),
+      useFactory: (config: ConfigService) => {
+        const redisUrl = config.get<string>('REDIS_URL', 'redis://localhost:6379');
+        
+        return {
+          redis: {
+            url: redisUrl,
+            // Configure connection retry and backoff strategy during Redis blips
+            retryStrategy: (times: number) => {
+              const delay = Math.min(times * 100, 3000);
+              return delay;
+            },
+            maxRetriesPerRequest: null,
+            enableReadyCheck: true,
+          },
+          defaultJobOptions: DEAD_LETTER_SETTINGS,
+        };
+      },
     }),
     BullModule.registerQueue(
-      { name: QUEUE_EMAIL, defaultJobOptions: DEAD_LETTER_SETTINGS },
-      { name: QUEUE_CONTRACT_EVENTS, defaultJobOptions: DEAD_LETTER_SETTINGS },
-      { name: QUEUE_ANALYTICS, defaultJobOptions: DEAD_LETTER_SETTINGS },
-      { name: QUEUE_PAYMENTS, defaultJobOptions: DEAD_LETTER_SETTINGS },
-      { name: QUEUE_HORIZON, defaultJobOptions: DEAD_LETTER_SETTINGS },
+      { name: QUEUE_EMAIL },
+      { name: QUEUE_CONTRACT_EVENTS },
+      { name: QUEUE_ANALYTICS },
+      { name: QUEUE_PAYMENTS },
+      { name: QUEUE_HORIZON },
     ),
     PrismaModule,
     ConfigModule,
@@ -47,10 +61,11 @@ const DEAD_LETTER_SETTINGS = {
     EmailProcessor,
     ContractEventsProcessor,
     AnalyticsProcessor,
+    PaymentProcessor,
     HorizonPollingProcessor,
     HorizonPollingScheduler,
+    MilestoneProcessor,
   ],
-  providers: [EmailProcessor, ContractEventsProcessor, AnalyticsProcessor, MilestoneProcessor],
   exports: [BullModule],
 })
 export class QueueModule {}
