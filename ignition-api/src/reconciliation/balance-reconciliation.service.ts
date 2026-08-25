@@ -28,7 +28,7 @@ export class BalanceReconciliationService {
     this.logger.log('Starting automated wallet balance reconciliation job...');
 
     const wallets = await this.prisma.wallet.findMany({
-      where: { isActive: true },
+      where: { isActive: true, deletedAt: null },
       select: {
         id: true,
         depositAddress: true,

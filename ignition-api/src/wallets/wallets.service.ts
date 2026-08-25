@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,7 +12,7 @@ import Keyv from 'keyv';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWalletDto, WalletNetwork } from './dto/create-wallet.dto';
-import { WalletType } from '@prisma/client';
+import { WalletStatus, WalletType } from '@prisma/client';
 import { WalletLimitService } from '../wallet/services/wallet-limit.service';
 
 @Injectable()
@@ -88,26 +89,139 @@ export class WalletsService {
       },
     });
 
+    return this.formatWalletResponse(wallet);
+  }
+
+  /**
+   * Get all active wallets for a user (filters out soft-deleted wallets by default).
+   */
+  async getWalletsByUser(userId: string, includeDeleted = false) {
+    const wallets = await this.prisma.wallet.findMany({
+      where: {
+        userId,
+        ...(includeDeleted ? {} : { deletedAt: null }),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return wallets.map((w) => this.formatWalletResponse(w));
+  }
+
+  /**
+   * Get a wallet by ID with soft-delete filtering and ownership verification.
+   */
+  async getWalletById(id: string, userId?: string, includeDeleted = false) {
+    const wallet = await this.prisma.wallet.findFirst({
+      where: {
+        id,
+        ...(includeDeleted ? {} : { deletedAt: null }),
+      },
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    if (userId && wallet.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to access this wallet',
+      );
+    }
+
+    return this.formatWalletResponse(wallet);
+  }
+
+  /**
+   * Soft-delete a wallet (Issue #424).
+   * Sets deletedAt, isActive=false, status=CLOSED without cascading or losing
+   * transaction history needed for tax and balance reconciliation.
+   */
+  async deleteWallet(id: string, userId?: string) {
+    const wallet = await this.prisma.wallet.findFirst({
+      where: { id, deletedAt: null },
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    if (userId && wallet.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to delete this wallet',
+      );
+    }
+
+    const deleted = await this.prisma.wallet.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        isActive: false,
+        status: WalletStatus.CLOSED,
+      },
+    });
+
+    await this.cacheManager.delete(`balance:${wallet.depositAddress}`);
+
     return {
-      id: wallet.id,
-      userId: wallet.userId,
-      network: wallet.network,
-      depositAddress: wallet.depositAddress,
-      walletType: wallet.walletType,
-      label: wallet.label,
-      dailyLimit: Number(wallet.dailyLimit),
-      monthlyLimit: Number(wallet.monthlyLimit),
-      isActive: wallet.isActive,
-      createdAt: wallet.createdAt,
+      success: true,
+      message: 'Wallet deleted successfully',
+      id: deleted.id,
+      deletedAt: deleted.deletedAt,
     };
   }
 
   /**
-   * Get current balances and recent transaction summary for a Stellar account
+   * Restore a previously soft-deleted wallet.
+   */
+  async restoreWallet(id: string, userId?: string) {
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { id },
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    if (!wallet.deletedAt) {
+      throw new BadRequestException('Wallet is not deleted');
+    }
+
+    if (userId && wallet.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have permission to restore this wallet',
+      );
+    }
+
+    const restored = await this.prisma.wallet.update({
+      where: { id },
+      data: {
+        deletedAt: null,
+        isActive: true,
+        status: WalletStatus.ACTIVE,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Wallet restored successfully',
+      id: restored.id,
+    };
+  }
+
+  /**
+   * Get current balances and recent transaction summary for a Stellar account.
    */
   async getBalanceAndRecentTransactions(walletAddress: string) {
     if (!walletAddress || !StrKey.isValidEd25519PublicKey(walletAddress)) {
       throw new BadRequestException('Invalid Stellar wallet address');
+    }
+
+    // Check if the wallet is soft-deleted
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { depositAddress: walletAddress },
+    });
+    if (wallet && wallet.deletedAt) {
+      throw new NotFoundException('Wallet not found');
     }
 
     const cacheKey = `balance:${walletAddress}`;
@@ -155,5 +269,23 @@ export class WalletsService {
     await this.cacheManager.set(cacheKey, result, ttlSec * 1000);
 
     return result;
+  }
+
+  private formatWalletResponse(wallet: any) {
+    return {
+      id: wallet.id,
+      userId: wallet.userId,
+      network: wallet.network,
+      depositAddress: wallet.depositAddress,
+      walletType: wallet.walletType,
+      status: wallet.status,
+      label: wallet.label,
+      dailyLimit: Number(wallet.dailyLimit),
+      monthlyLimit: Number(wallet.monthlyLimit),
+      isActive: wallet.isActive,
+      createdAt: wallet.createdAt,
+      updatedAt: wallet.updatedAt,
+      deletedAt: wallet.deletedAt ?? undefined,
+    };
   }
 }
