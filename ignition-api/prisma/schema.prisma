@@ -444,6 +444,7 @@ model Wallet {
   isActive        Boolean       @default(true)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
 
   // Relations
   addresses        Address[]
@@ -456,9 +457,13 @@ model Wallet {
   @@index([depositAddress])
   @@index([network])
   @@index([status])
+  @@index([deletedAt])
   // Compound indexes for id+isActive guard lookups (addresses service, wallets service)
   @@index([id, isActive])
   @@index([userId, isActive])
+  @@index([id, deletedAt])
+  @@index([userId, deletedAt])
+  @@index([id, isActive, deletedAt])
   @@map("wallets")
 }
 

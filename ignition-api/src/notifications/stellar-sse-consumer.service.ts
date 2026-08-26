@@ -167,7 +167,7 @@ export class StellarSseConsumerService
   private async startAllWatchers(): Promise<void> {
     try {
       const wallets = await this.prisma.wallet.findMany({
-        where: { isActive: true },
+        where: { isActive: true, deletedAt: null },
         select: { depositAddress: true },
       });
 
@@ -285,7 +285,10 @@ export class StellarSseConsumerService
 
     const armIdleTimer = () => {
       clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => idleController.abort(), STREAM_IDLE_TIMEOUT_MS);
+      idleTimer = setTimeout(
+        () => idleController.abort(),
+        STREAM_IDLE_TIMEOUT_MS,
+      );
     };
 
     try {
@@ -422,50 +425,54 @@ export class StellarSseConsumerService
       });
 
       // Execute database modifications inside a transaction for atomicity and thread-safety
-      const { updatedCampaign, completedMilestoneIds, campaignCompleted } = await this.prisma.$transaction(async (tx) => {
-        // 1. Atomically increment the campaign's raisedAmount
-        const currentCampaign = await tx.campaign.update({
-          where: { id: campaign.id },
-          data: {
-            raisedAmount: {
-              increment: amount,
-            },
-          },
-          include: {
-            milestones: { where: { status: 'ACTIVE' } },
-          },
-        });
-
-        const newRaisedAmount = Number(currentCampaign.raisedAmount);
-
-        // 2. Identify and complete qualifying milestones
-        const completedMilestoneIds: string[] = [];
-        for (const milestone of currentCampaign.milestones) {
-          if (newRaisedAmount >= Number(milestone.targetAmount)) {
-            await tx.milestone.update({
-              where: { id: milestone.id },
-              data: { status: 'COMPLETED', completedAt: new Date() },
-            });
-            completedMilestoneIds.push(milestone.id);
-          }
-        }
-
-        // 3. Complete the campaign if the goal has been met
-        let campaignCompleted = false;
-        if (newRaisedAmount >= Number(currentCampaign.goalAmount) && currentCampaign.status !== 'COMPLETED') {
-          await tx.campaign.update({
+      const { updatedCampaign, completedMilestoneIds, campaignCompleted } =
+        await this.prisma.$transaction(async (tx) => {
+          // 1. Atomically increment the campaign's raisedAmount
+          const currentCampaign = await tx.campaign.update({
             where: { id: campaign.id },
-            data: { status: 'COMPLETED' },
+            data: {
+              raisedAmount: {
+                increment: amount,
+              },
+            },
+            include: {
+              milestones: { where: { status: 'ACTIVE' } },
+            },
           });
-          campaignCompleted = true;
-        }
 
-        return {
-          updatedCampaign: currentCampaign,
-          completedMilestoneIds,
-          campaignCompleted,
-        };
-      });
+          const newRaisedAmount = Number(currentCampaign.raisedAmount);
+
+          // 2. Identify and complete qualifying milestones
+          const completedMilestoneIds: string[] = [];
+          for (const milestone of currentCampaign.milestones) {
+            if (newRaisedAmount >= Number(milestone.targetAmount)) {
+              await tx.milestone.update({
+                where: { id: milestone.id },
+                data: { status: 'COMPLETED', completedAt: new Date() },
+              });
+              completedMilestoneIds.push(milestone.id);
+            }
+          }
+
+          // 3. Complete the campaign if the goal has been met
+          let campaignCompleted = false;
+          if (
+            newRaisedAmount >= Number(currentCampaign.goalAmount) &&
+            currentCampaign.status !== 'COMPLETED'
+          ) {
+            await tx.campaign.update({
+              where: { id: campaign.id },
+              data: { status: 'COMPLETED' },
+            });
+            campaignCompleted = true;
+          }
+
+          return {
+            updatedCampaign: currentCampaign,
+            completedMilestoneIds,
+            campaignCompleted,
+          };
+        });
 
       // ── MILESTONE_REACHED ──────────────────────────────────────────────
       for (const milestoneId of completedMilestoneIds) {
