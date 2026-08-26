@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsNumber, Min, IsEnum } from 'class-validator'
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { IsString, IsOptional, IsNumber, Min, IsEnum } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum Sep24Operation {
   DEPOSIT = 'deposit',
@@ -9,54 +9,77 @@ export enum Sep24Operation {
 export class InitiateSep24Dto {
   @ApiProperty({ description: 'Anchor name (e.g. "StellarX", "AnchorUSD")' })
   @IsString()
-  anchorName: string
+  anchorName: string;
 
   @ApiProperty({ enum: Sep24Operation })
   @IsEnum(Sep24Operation)
-  operation: Sep24Operation
+  operation: Sep24Operation;
 
   @ApiProperty({ description: 'Asset code to deposit/withdraw' })
   @IsString()
-  assetCode: string
+  assetCode: string;
 
-  @ApiPropertyOptional({ description: 'Asset issuer (optional for native assets)' })
+  @ApiPropertyOptional({
+    description: 'Asset issuer (optional for native assets)',
+  })
   @IsString()
   @IsOptional()
-  assetIssuer?: string
+  assetIssuer?: string;
 
-  @ApiPropertyOptional({ description: 'Amount (optional, some anchors allow empty)' })
+  @ApiPropertyOptional({
+    description: 'Amount (optional, some anchors allow empty)',
+  })
   @IsNumber()
   @Min(0)
   @IsOptional()
-  amount?: number
+  amount?: number;
 
   @ApiProperty({ description: "User's Stellar account (G...)" })
   @IsString()
-  stellarAccount: string
+  stellarAccount: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional existing transaction ID to resume or re-enter interactive flow (Issue #425)',
+  })
+  @IsString()
+  @IsOptional()
+  transactionId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional existing transaction ID alias in snake_case per SEP-24 specification (Issue #425)',
+  })
+  @IsString()
+  @IsOptional()
+  transaction_id?: string;
 }
 
 export class Sep24StatusDto {
   @ApiProperty({ description: 'Internal SEP-24 transaction ID' })
   @IsString()
-  id: string
+  id: string;
 }
 
 export class GetSep24HistoryQueryDto {
   @ApiPropertyOptional({ description: 'Page number (1-based)', example: 1 })
   @IsOptional()
-  page?: number
+  page?: number;
 
   @ApiPropertyOptional({ description: 'Items per page (max 100)', example: 20 })
   @IsOptional()
-  limit?: number
+  limit?: number;
 
-  @ApiPropertyOptional({ enum: Sep24Operation, description: 'Filter by operation type' })
+  @ApiPropertyOptional({
+    enum: Sep24Operation,
+    description: 'Filter by operation type',
+  })
   @IsEnum(Sep24Operation)
   @IsOptional()
-  operation?: Sep24Operation
+  operation?: Sep24Operation;
 
   @ApiPropertyOptional({ description: 'Filter by anchor name' })
   @IsString()
   @IsOptional()
-  anchorName?: string
+  anchorName?: string;
 }
