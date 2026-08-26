@@ -85,9 +85,14 @@ export class PaymentsService {
         amount: dto.amount,
         assetCode: dto.assetCode,
         status: 'PENDING',
-        metadata: recipientWallet
-          ? undefined
-          : { externalRecipientAddress: dto.recipientAddress },
+        metadata: {
+          ...(recipientWallet
+            ? {}
+            : { externalRecipientAddress: dto.recipientAddress }),
+          // Issue #408: store idempotency key so duplicate-initiation guard
+          // can detect retries within the de-dup window.
+          idempotencyKey: effectiveKey,
+        },
       },
     });
 
@@ -181,6 +186,37 @@ export class PaymentsService {
     if (senderWallet.status === 'CLOSED') {
       throw new ForbiddenException(
         'Outgoing transactions are not allowed: wallet is closed',
+      );
+    }
+
+    // ── Issue #408: Idempotency guard ─────────────────────────────────────
+    // Reject duplicate initiation when the same idempotency key was already
+    // used for a recent PENDING transaction. This prevents network-retry
+    // double-submits from creating duplicate on-chain payments.
+    const effectiveKey =
+      dto.idempotencyKey ?? `${senderWalletId}:${dto.recipientAddress}:${dto.amount}:${dto.assetCode}`;
+    const recentWindowMs = 60 * 1000; // 60-second de-dup window
+    const windowStart = new Date(Date.now() - recentWindowMs);
+
+    const existingPending = await this.prisma.transaction.findFirst({
+      where: {
+        fromWalletId: senderWalletId,
+        status: 'PENDING',
+        createdAt: { gte: windowStart },
+        metadata: {
+          path: ['idempotencyKey'],
+          equals: effectiveKey,
+        },
+      },
+    });
+
+    if (existingPending) {
+      this.logger.warn(
+        `Duplicate payment rejected (idempotencyKey=${effectiveKey}): ` +
+          `existing txn=${existingPending.id}`,
+      );
+      throw new UnprocessableEntityException(
+        `A payment with idempotency key '${effectiveKey}' is already being processed (txn=${existingPending.id}).`,
       );
     }
 
