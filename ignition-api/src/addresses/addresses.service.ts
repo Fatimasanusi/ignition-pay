@@ -34,8 +34,8 @@ export class AddressesService {
     }
 
     if (dto.walletId) {
-      const wallet = await this.prisma.wallet.findUnique({
-        where: { id: dto.walletId, isActive: true },
+      const wallet = await this.prisma.wallet.findFirst({
+        where: { id: dto.walletId, isActive: true, deletedAt: null },
       });
       if (!wallet) {
         throw new NotFoundException('Wallet not found');
@@ -100,8 +100,8 @@ export class AddressesService {
     }
 
     if (dto.walletId) {
-      const wallet = await this.prisma.wallet.findUnique({
-        where: { id: dto.walletId, isActive: true },
+      const wallet = await this.prisma.wallet.findFirst({
+        where: { id: dto.walletId, isActive: true, deletedAt: null },
       });
       if (!wallet) {
         throw new NotFoundException('Wallet not found');
@@ -160,8 +160,8 @@ export class AddressesService {
   async generate(userId: string, dto: GenerateAddressDto) {
     const { walletId, network = WalletNetwork.STELLAR, label } = dto;
 
-    const wallet = await this.prisma.wallet.findUnique({
-      where: { id: walletId, isActive: true },
+    const wallet = await this.prisma.wallet.findFirst({
+      where: { id: walletId, isActive: true, deletedAt: null },
     });
     if (!wallet) throw new NotFoundException('Wallet not found');
     if (wallet.userId !== userId)
@@ -188,7 +188,10 @@ export class AddressesService {
       // Mirror allocation timestamp on the canonical Address row if present.
       await this.prisma.address.updateMany({
         where: { address: reallocated.address },
-        data: { allocatedAt: reallocated.allocatedAt, lastActivityAt: new Date() },
+        data: {
+          allocatedAt: reallocated.allocatedAt,
+          lastActivityAt: new Date(),
+        },
       });
 
       return {
@@ -261,8 +264,8 @@ export class AddressesService {
   }
 
   async listByWallet(userId: string, walletId: string) {
-    const wallet = await this.prisma.wallet.findUnique({
-      where: { id: walletId, isActive: true },
+    const wallet = await this.prisma.wallet.findFirst({
+      where: { id: walletId, isActive: true, deletedAt: null },
     });
     if (!wallet || wallet.userId !== userId)
       throw new NotFoundException('Wallet not found');
@@ -299,6 +302,8 @@ export class AddressesService {
     }
 
     return { valid: true, address };
+  }
+
   /**
    * Marks a DepositAddress as AVAILABLE (released) once activity on it has
    * ceased.  Callers (e.g. a webhook handler) should invoke this after a
@@ -328,8 +333,8 @@ export class AddressesService {
    * Generates a memo (id, text, or hash) for a user wallet deposit.
    */
   async generateMemo(userId: string, dto: GenerateMemoDto) {
-    const wallet = await this.prisma.wallet.findUnique({
-      where: { id: dto.walletId, isActive: true },
+    const wallet = await this.prisma.wallet.findFirst({
+      where: { id: dto.walletId, isActive: true, deletedAt: null },
     });
     if (!wallet || wallet.userId !== userId) {
       throw new NotFoundException('Wallet not found');
@@ -342,7 +347,9 @@ export class AddressesService {
       // Convert string seed (e.g. UUID) into a deterministic uint64 numeric string
       let hash = BigInt(0);
       for (let i = 0; i < seedValue.length; i++) {
-        hash = (hash * BigInt(31) + BigInt(seedValue.charCodeAt(i))) % BigInt('18446744073709551615');
+        hash =
+          (hash * BigInt(31) + BigInt(seedValue.charCodeAt(i))) %
+          BigInt('18446744073709551615');
       }
       seedValue = hash.toString();
     }
@@ -366,6 +373,88 @@ export class AddressesService {
    * Validates format and routability of a deposit memo.
    */
   async validateMemo(dto: ValidateMemoDto) {
-    const wallet = await this.prisma.wallet.findUnique({
-      where: { id: dto.walletId, isActive: true },
+    const memoType = dto.memoType || 'none';
+    const memoValue = dto.memoValue ?? null;
+
+    const valResult = validateStellarMemo(memoType, memoValue);
+
+    let routingResult: any = null;
+    if (dto.destination) {
+      try {
+        routingResult = extractRouting({
+          destination: dto.destination,
+          memoType,
+          memoValue,
+          sourceAccount: null,
+        });
+      } catch (err: any) {
+        valResult.warnings.push({
+          code: 'INVALID_DESTINATION' as any,
+          severity: 'error',
+          message: err?.message ?? 'Invalid destination address',
+        });
+      }
+    }
+
+    return {
+      valid: valResult.valid,
+      memoType,
+      memoValue,
+      normalizedValue: valResult.normalizedValue,
+      routingId:
+        routingResult?.routingId?.toString() ?? valResult.normalizedValue,
+      error: valResult.error,
+      warnings: [...valResult.warnings, ...(routingResult?.warnings ?? [])],
+    };
+  }
+
+  /**
+   * Resolves deposit attribution from destination address + memo to the matching user/wallet.
+   */
+  async resolveDeposit(dto: ResolveDepositDto) {
+    const memoType = dto.memoType ?? 'none';
+    const memoValue = dto.memoValue ?? null;
+
+    let routing: any;
+    try {
+      routing = extractRouting({
+        destination: dto.destination,
+        memoType,
+        memoValue,
+        sourceAccount: null,
+      });
+    } catch (err: any) {
+      throw new BadRequestException(
+        err?.message ?? 'Invalid destination address for routing',
+      );
+    }
+
+    const targetAccount = routing.destinationBaseAccount ?? dto.destination;
+
+    // Search wallet directly by depositAddress
+    let wallet = await this.prisma.wallet.findFirst({
+      where: { depositAddress: targetAccount, deletedAt: null },
     });
+
+    // If not found directly, search in DepositAddress table
+    if (!wallet) {
+      const depositAddrRecord = await this.prisma.depositAddress.findUnique({
+        where: { address: targetAccount },
+        include: { wallet: true },
+      });
+      if (depositAddrRecord && !depositAddrRecord.wallet?.deletedAt) {
+        wallet = depositAddrRecord.wallet;
+      }
+    }
+
+    return {
+      routed: !!wallet,
+      destinationBaseAccount: routing.destinationBaseAccount,
+      routingId: routing.routingId?.toString() ?? null,
+      routingSource: routing.routingSource,
+      walletId: wallet?.id ?? null,
+      userId: wallet?.userId ?? null,
+      warnings: routing.warnings,
+    };
+  }
+}

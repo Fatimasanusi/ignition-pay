@@ -1,5 +1,3 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { Prisma, TransactionStatus } from '@prisma/client';
 import {
   Injectable,
   ConflictException,
@@ -14,61 +12,14 @@ import {
   TransactionDto,
 } from './dto/get-transactions.dto';
 
-/**
- * Legal TransactionStatus transitions (Issue #247).
- *
- * Only these edges are permitted; any other change must be rejected.
- * The full directed graph is:
- *
- *   PENDING  → PROCESSING | FAILED | CANCELLED
- *   PROCESSING → COMPLETED | FAILED | CANCELLED
- *   COMPLETED → REFUNDED   (only via an explicit refund flow)
- *   FAILED    → (terminal — no further transitions)
- *   CANCELLED → (terminal — no further transitions)
- *   REFUNDED  → (terminal — no further transitions)
- */
-const ALLOWED_TRANSITIONS: Record<TransactionStatus, TransactionStatus[]> = {
-  [TransactionStatus.PENDING]: [
-    TransactionStatus.PROCESSING,
-    TransactionStatus.FAILED,
-    TransactionStatus.CANCELLED,
-  ],
-  [TransactionStatus.PROCESSING]: [
-    TransactionStatus.COMPLETED,
-    TransactionStatus.FAILED,
-    TransactionStatus.CANCELLED,
-  ],
-  [TransactionStatus.COMPLETED]: [TransactionStatus.REFUNDED],
-  [TransactionStatus.FAILED]: [],
-  [TransactionStatus.CANCELLED]: [],
-  [TransactionStatus.REFUNDED]: [],
-};
-
 @Injectable()
 export class TransactionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Validate a TransactionStatus transition and throw BadRequestException
-   * if the transition is illegal.
-   *
-   * @throws BadRequestException when the transition from `from` → `to` is not in
-   *         the allow-list defined by ALLOWED_TRANSITIONS.
-   */
-  assertLegalTransition(from: TransactionStatus, to: TransactionStatus): void {
-    const allowed = ALLOWED_TRANSITIONS[from] ?? [];
-    if (!allowed.includes(to)) {
-      throw new BadRequestException(
-        `Illegal status transition: ${from} → ${to}. ` +
-          `Allowed transitions from ${from}: [${allowed.join(', ') || 'none — terminal state'}].`,
-      );
-    }
-  }
-
   async getTransactions(
     query: GetTransactionsQueryDto,
   ): Promise<GetTransactionsResponseDto> {
-    const { cursor, limit, dateFrom, dateTo, status, type, asset, search } =
+    const { page, limit, dateFrom, dateTo, status, type, asset, search } =
       query;
 
     // ── Issue #411: Cursor pagination ──────────────────────────────────────
@@ -175,15 +126,6 @@ export class TransactionsService {
 
   /**
    * Issue #244 — Idempotent transaction submission.
-   *
-   * If a `stellarTxHash` is provided, we attempt to insert the record with
-   * that unique hash.  On a unique-constraint violation (the hash already
-   * exists), we return the existing row instead of creating a duplicate.
-   * This ensures network-blip retries never produce double on-chain sends.
-   *
-   * If no `stellarTxHash` is supplied yet (hash not known at submission time),
-   * the caller should update the row later (e.g. via the contract-events
-   * processor) to set the hash and finalise the status.
    */
   async submitTransaction(
     dto: SubmitTransactionDto,
@@ -240,8 +182,6 @@ export class TransactionsService {
         alreadyExisted: false,
       };
     } catch (err: any) {
-      // Handle race condition: another request inserted the same hash between
-      // our read and write above.  Treat as idempotent success.
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002' &&

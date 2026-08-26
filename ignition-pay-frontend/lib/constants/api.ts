@@ -55,6 +55,9 @@ export const API_ENDPOINTS = {
   apiKeys: {
     root: '/api-keys',
     byId: (id: string) => `/api-keys/${id}`,
+    rotate: (id: string) => `/api-keys/${id}/rotate`,
+    rotateFinalize: (id: string) => `/api-keys/${id}/rotate/finalize`,
+    rotateCancel: (id: string) => `/api-keys/${id}/rotate/cancel`,
   },
   sep24: {
     initiate: '/sep24/initiate',

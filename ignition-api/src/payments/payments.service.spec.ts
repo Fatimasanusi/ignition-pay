@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bull';
 import { PaymentsService } from './payments.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -53,8 +56,6 @@ const buildPrisma = ({
   dailySpent?: string;
   monthlySpent?: string;
 } = {}) => {
-  let aggregateCallCount = 0;
-
   return {
     wallet: {
       findUnique: jest.fn().mockImplementation(({ where }: any) => {
@@ -64,10 +65,13 @@ const buildPrisma = ({
       }),
     },
     transaction: {
-      aggregate: jest.fn().mockImplementation(() => {
-        // First call = daily window, second call = monthly window
-        const spent = aggregateCallCount === 0 ? dailySpent : monthlySpent;
-        aggregateCallCount++;
+      aggregate: jest.fn().mockImplementation(({ where }: any) => {
+        const since = where?.createdAt?.gte;
+        const now = Date.now();
+        // If since is around 30 days ago (more than 2 days ago), it's monthly
+        const isMonthly =
+          since && now - new Date(since).getTime() > 2 * 24 * 60 * 60 * 1000;
+        const spent = isMonthly ? monthlySpent : dailySpent;
         return Promise.resolve({ _sum: { amount: spent } });
       }),
       create: jest.fn().mockResolvedValue(transaction),
@@ -76,7 +80,9 @@ const buildPrisma = ({
 };
 
 /** Builds a Bull queue mock. */
-const buildQueue = () => ({ add: jest.fn().mockResolvedValue({ id: 'job-1' }) });
+const buildQueue = () => ({
+  add: jest.fn().mockResolvedValue({ id: 'job-1' }),
+});
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
@@ -154,7 +160,8 @@ describe('PaymentsService', () => {
     it('sets toWalletId to the recipient wallet id when the address maps to an internal wallet', async () => {
       const recipientWallet = makeWallet({
         id: 'wallet-recipient-2',
-        depositAddress: 'GRECIPIENT0000000000000000000000000000000000000000000000',
+        depositAddress:
+          'GRECIPIENT0000000000000000000000000000000000000000000000',
       });
 
       await setup({ recipientWallet });

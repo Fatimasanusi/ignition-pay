@@ -12,12 +12,9 @@ import {
   Copy,
   ArrowUpRight,
   BarChart3,
-  Key,
   Globe,
   Smartphone,
   Trash2,
-  RefreshCw,
-  Plus,
   Palette,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -28,6 +25,7 @@ import { usePreferences } from '../state'
 import { updateProfile } from '../services'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { useTheme } from '@/hooks/use-theme'
+import { ApiKeysSection } from './ApiKeysSection'
 
 export function SettingsPage() {
   const [showSeed, setShowSeed] = useState(false)
@@ -46,11 +44,6 @@ export function SettingsPage() {
     { id: '1', device: 'Chrome on macOS', ip: '192.168.1.1', lastActive: '2 minutes ago', current: true },
     { id: '2', device: 'Safari on iPhone', ip: '192.168.1.2', lastActive: '2 hours ago', current: false },
   ])
-  const [apiKeys] = useState([
-    { id: '1', name: 'Production API Key', prefix: 'sk_p...a1b2', created: 'Jan 15, 2026', lastUsed: 'Today' },
-    { id: '2', name: 'Development API Key', prefix: 'sk_d...c3d4', created: 'Mar 3, 2026', lastUsed: 'Yesterday' },
-  ])
-  const [showApiKey, setShowApiKey] = useState<string | null>(null)
   const { preferences, save, saving } = usePreferences()
   const { mode } = useTheme()
 
@@ -279,53 +272,7 @@ export function SettingsPage() {
         </div>
 
         {/* Security Section - API Keys */}
-        <div className="bg-card rounded-xl border border-border p-8 space-y-6">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                <Key size={20} className="text-cyan-500" />
-              </div>
-              <h2 className="text-xl font-bold text-foreground">API Keys</h2>
-            </div>
-            <Button variant="outline" size="sm">
-              <Plus size={16} className="mr-2" />
-              Create Key
-            </Button>
-          </div>
-
-          <div className="space-y-4">
-            {apiKeys.map((key) => (
-              <div key={key.id} className="flex items-center justify-between py-4 border-b border-border last:border-b-0">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className="font-semibold text-foreground">{key.name}</p>
-                    <button
-                      onClick={() => setShowApiKey(showApiKey === key.id ? null : key.id)}
-                      className="text-primary hover:text-primary/80 transition-colors"
-                      aria-label={showApiKey === key.id ? 'Hide API key' : 'Show API key'}
-                    >
-                      {showApiKey === key.id ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-                  <p className="text-sm font-mono text-muted-foreground">
-                    {showApiKey === key.id ? `${key.prefix}...${key.id}${key.id}${key.id}` : key.prefix.concat('...')}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Created {key.created} &middot; Last used {key.lastUsed}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
-                    <RefreshCw size={14} />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-400 hover:bg-red-500/10">
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ApiKeysSection />
 
         {/* Notifications Section */}
         <div className="bg-card rounded-xl border border-border p-8 space-y-6">
