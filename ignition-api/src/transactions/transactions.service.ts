@@ -19,9 +19,8 @@ export class TransactionsService {
   async getTransactions(
     query: GetTransactionsQueryDto,
   ): Promise<GetTransactionsResponseDto> {
-    const { page, limit, dateFrom, dateTo, status, type, asset, search } =
+    const { cursor, limit, dateFrom, dateTo, status, type, asset, search } =
       query;
-    const skip = (page - 1) * limit;
 
     const where: Prisma.TransactionWhereInput = {};
 
@@ -49,28 +48,31 @@ export class TransactionsService {
       ];
     }
 
-    const [total, transactions] = await Promise.all([
-      this.prisma.transaction.count({ where }),
-      this.prisma.transaction.findMany({
-        where,
-        select: {
-          id: true,
-          fromWalletId: true,
-          toWalletId: true,
-          amount: true,
-          assetCode: true,
-          stellarTxHash: true,
-          status: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-    ]);
+    // Fetch one extra row so we can tell whether another page exists
+    // without running a separate COUNT query.
+    const transactions = await this.prisma.transaction.findMany({
+      where,
+      select: {
+        id: true,
+        fromWalletId: true,
+        toWalletId: true,
+        amount: true,
+        assetCode: true,
+        stellarTxHash: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      // When a cursor is supplied, start after that record.
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+    });
 
-    const data: TransactionDto[] = transactions.map((t) => ({
+    const hasNextPage = transactions.length > limit;
+    const page = hasNextPage ? transactions.slice(0, limit) : transactions;
+
+    const data: TransactionDto[] = page.map((t) => ({
       id: t.id,
       fromWalletId: t.fromWalletId,
       toWalletId: t.toWalletId,
@@ -82,7 +84,9 @@ export class TransactionsService {
       updatedAt: t.updatedAt,
     }));
 
-    return { data, total, page, limit };
+    const nextCursor = hasNextPage ? (page[page.length - 1]?.id ?? null) : null;
+
+    return { data, nextCursor, hasNextPage, limit };
   }
 
   /**

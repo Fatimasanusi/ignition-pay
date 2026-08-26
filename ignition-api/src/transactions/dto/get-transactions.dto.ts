@@ -12,9 +12,9 @@ import {
 /**
  * Query DTO for GET /transactions (Issue #246).
  *
- * Uses cursor-based pagination instead of offset pagination.
- * `cursor` is the `id` of the last item from the previous page.
- * When omitted, the first page is returned.
+ * Uses cursor-based pagination — `cursor` is the `id` of the last item
+ * returned on the previous page. Omit to fetch the first page.
+ * Offset-based `page` / `skip` fields have been removed.
  */
 export class GetTransactionsQueryDto {
   /**

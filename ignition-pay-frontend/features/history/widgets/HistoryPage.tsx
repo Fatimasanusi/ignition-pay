@@ -1,80 +1,15 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { Download, Search } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { TransactionRow } from '@/components/transaction-row'
 import { useOptimisticTransactions } from '@/features/history/state'
+import { fetchTransactions } from '@/features/history/services'
 import type { Transaction, OptimisticTransaction } from '@/features/history/models'
 
-// Mock transactions (to be replaced by real API integration)
-const mockTransactions: Transaction[] = [
-  {
-    id: '1',
-    type: 'sent' as const,
-    asset: 'XLM',
-    amount: 100.0,
-    recipient: 'GBJCHUKZMTFSLOMNC7P4TS4VJJBTCYL3YCWKEANE7FCNHWHP6ZPWPX3',
-    txHash: 'abc123def456',
-    timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    status: 'confirmed' as const,
-  },
-  {
-    id: '2',
-    type: 'received' as const,
-    asset: 'USDC',
-    amount: 500.0,
-    recipient: 'GBJCHUKZMTFSLOMNC7P4TS4VJJBTCYL3YCWKEANE7FCNHWHP6ZPWPX3',
-    txHash: 'bcd234ef567',
-    timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    status: 'confirmed' as const,
-  },
-  {
-    id: '3',
-    type: 'sent' as const,
-    asset: 'AQUA',
-    amount: 50.0,
-    recipient: 'GAJDLFWC3H2LMYMVLYWE3MID4YSKKFVDBMPUEPBJ4PBGQRGKQTKJLXDX',
-    txHash: 'cde345fg678',
-    timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000),
-    status: 'pending' as const,
-  },
-  {
-    id: '4',
-    type: 'received' as const,
-    asset: 'XLM',
-    amount: 250.5,
-    recipient: 'GCJQNZFYXGX6XNXAKF3CDXZ3XGNXSJN3FVXQXGNJQXGNJXGNJXGNJXG',
-    txHash: 'def456gh789',
-    timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000),
-    status: 'confirmed' as const,
-  },
-  {
-    id: '5',
-    type: 'sent' as const,
-    asset: 'USDC',
-    amount: 1000.0,
-    recipient: 'GBQABHNZ2EXZCVSQGX4N3TDPQF3Z2JKPFQZQGJXGNJQXGNJXGNJXGNJXG',
-    txHash: 'efg567hi890',
-    timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-    status: 'confirmed' as const,
-  },
-  {
-    id: '6',
-    type: 'received' as const,
-    asset: 'XLM',
-    amount: 75.25,
-    recipient: 'GCJQNZFYXGX6XNXAKF3CDXZ3XGNXSJN3FVXQXGNJQXGNJXGNJXGNJXG',
-    txHash: 'fgh678ij901',
-    timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-    status: 'confirmed' as const,
-  },
-]
-
-const PAGE_SIZE = 4
-// Derive the set of distinct asset codes from the mock data
-const ASSET_OPTIONS = ['all', ...Array.from(new Set(mockTransactions.map((t) => t.asset)))]
+const PAGE_SIZE = 10
 const STATUS_OPTIONS = ['all', 'confirmed', 'pending'] as const
 type StatusOption = (typeof STATUS_OPTIONS)[number]
 
@@ -87,101 +22,123 @@ export function HistoryPage() {
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
-  const [visibleTransactions, setVisibleTransactions] = useState<(Transaction | OptimisticTransaction)[]>([])
-  const [cursor, setCursor] = useState<string | null>(null)
+
+  // Server-side pagination state
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+
+  // Stats derived from all loaded pages (server gives us what it can)
+  const [stats, setStats] = useState({ total: 0, sent: 0, received: 0, totalVolume: 0 })
+
   const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   /**
-   * Merges optimistic pending entries with real backend entries.
-   * Optimistic entries appear at the top (most recent first).
-   * Automatically deduplicates — once real entry arrives, optimistic is gone.
+   * Translate the UI filter state into fetchTransactions arguments.
    */
-  const mergedTransactions = useMemo(() => {
-    return [...optimisticEntries, ...mockTransactions] as (Transaction | OptimisticTransaction)[]
-  }, [optimisticEntries])
+  const buildQueryArgs = useCallback(() => ({
+    limit: PAGE_SIZE,
+    status: filterStatus !== 'all' ? filterStatus.toUpperCase() : undefined,
+    asset: filterAsset !== 'all' ? filterAsset : undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    search: searchTerm || undefined,
+    type: filterType !== 'all' ? filterType : undefined,
+  }), [filterType, filterAsset, filterStatus, dateFrom, dateTo, searchTerm])
 
-  const filteredTransactions = useMemo(() => {
-    return mergedTransactions.filter((tx) => {
-      if (filterType !== 'all' && tx.type !== filterType) return false
-      if (filterAsset !== 'all' && tx.asset !== filterAsset) return false
-      if (filterStatus !== 'all' && tx.status !== filterStatus) return false
+  /**
+   * Load the first page. Replaces any previously loaded transactions.
+   */
+  const loadFirstPage = useCallback(async () => {
+    // Cancel any in-flight request
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
 
-      if (dateFrom) {
-        const from = new Date(dateFrom)
-        from.setHours(0, 0, 0, 0)
-        if (tx.timestamp < from) return false
-      }
-      if (dateTo) {
-        const to = new Date(dateTo)
-        to.setHours(23, 59, 59, 999)
-        if (tx.timestamp > to) return false
-      }
+    setIsLoading(true)
+    setFetchError(null)
+    setTransactions([])
+    setNextCursor(null)
+    setHasMore(false)
 
-      if (searchTerm) {
-        const q = searchTerm.toLowerCase()
-        const matchesAddress = tx.recipient.toLowerCase().includes(q)
-        const matchesAsset = tx.asset.toLowerCase().includes(q)
-        // txHash: exact match (trimmed) — only for real transactions
-        const matchesTxHash = 'txHash' in tx && tx.txHash?.toLowerCase() === q
-        if (!matchesAddress && !matchesAsset && !matchesTxHash) return false
-      }
+    try {
+      const result = await fetchTransactions(buildQueryArgs(), controller.signal)
+      if (controller.signal.aborted) return
+      setTransactions(result.data)
+      setNextCursor(result.nextCursor)
+      setHasMore(result.hasNextPage)
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return
+      setFetchError('Failed to load transactions. Please try again.')
+    } finally {
+      if (!controller.signal.aborted) setIsLoading(false)
+    }
+  }, [buildQueryArgs])
 
-      return true
-    })
-  }, [mergedTransactions, filterType, filterAsset, filterStatus, dateFrom, dateTo, searchTerm])
+  /**
+   * Load the next page and append to the existing list.
+   */
+  const loadNextPage = useCallback(async () => {
+    if (!nextCursor || isLoadingMore) return
 
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setIsLoadingMore(true)
+
+    try {
+      const result = await fetchTransactions(
+        { ...buildQueryArgs(), cursor: nextCursor },
+        controller.signal,
+      )
+      if (controller.signal.aborted) return
+      setTransactions((prev) => [...prev, ...result.data])
+      setNextCursor(result.nextCursor)
+      setHasMore(result.hasNextPage)
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return
+      setFetchError('Failed to load more transactions.')
+    } finally {
+      if (!controller.signal.aborted) setIsLoadingMore(false)
+    }
+  }, [buildQueryArgs, nextCursor, isLoadingMore])
+
+  // Reload from page 1 whenever filters change
   useEffect(() => {
-    const firstPage = filteredTransactions.slice(0, PAGE_SIZE)
-    setVisibleTransactions(firstPage)
-    setCursor(filteredTransactions[PAGE_SIZE - 1]?.id ?? null)
-    setHasMore(filteredTransactions.length > firstPage.length)
-    setIsLoadingMore(false)
-  }, [filteredTransactions])
+    loadFirstPage()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterType, filterAsset, filterStatus, dateFrom, dateTo, searchTerm])
 
+  // Recompute stats whenever the loaded transaction list changes
+  useEffect(() => {
+    const allVisible = [...optimisticEntries, ...transactions] as (Transaction | OptimisticTransaction)[]
+    setStats({
+      total: allVisible.length,
+      sent: allVisible.filter((tx) => tx.type === 'sent').length,
+      received: allVisible.filter((tx) => tx.type === 'received').length,
+      totalVolume: allVisible.reduce((acc, tx) => acc + tx.amount, 0),
+    })
+  }, [transactions, optimisticEntries])
+
+  // Infinite scroll — trigger next page when the sentinel enters the viewport
   useEffect(() => {
     if (!sentinelRef.current || !hasMore) return
 
     const observer = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries
-
-        if (entry?.isIntersecting && !isLoadingMore) {
-          const currentIndex = filteredTransactions.findIndex((tx) => {
-            const txId = 'optimisticId' in tx ? tx.optimisticId : tx.id
-            return txId === cursor
-          })
-          const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0
-          const nextPage = filteredTransactions.slice(startIndex, startIndex + PAGE_SIZE)
-
-          if (nextPage.length === 0) {
-            setHasMore(false)
-            return
-          }
-
-          setIsLoadingMore(true)
-          setVisibleTransactions((prev) => [...prev, ...nextPage])
-          const lastTx = nextPage[nextPage.length - 1]
-          setCursor('optimisticId' in lastTx ? lastTx.optimisticId : lastTx.id)
-          setHasMore(startIndex + nextPage.length < filteredTransactions.length)
-          setIsLoadingMore(false)
-        }
+      ([entry]) => {
+        if (entry?.isIntersecting) loadNextPage()
       },
       { rootMargin: '200px 0px' },
     )
 
     observer.observe(sentinelRef.current)
-
     return () => observer.disconnect()
-  }, [cursor, filteredTransactions, hasMore, isLoadingMore])
-
-  const stats = {
-    total: mockTransactions.length + optimisticEntries.length,
-    sent: mergedTransactions.filter((tx) => tx.type === 'sent').length,
-    received: mergedTransactions.filter((tx) => tx.type === 'received').length,
-    totalVolume: mergedTransactions.reduce((acc, tx) => acc + tx.amount, 0),
-  }
+  }, [hasMore, loadNextPage])
 
   const hasActiveFilters =
     filterType !== 'all' ||
@@ -199,6 +156,15 @@ export function HistoryPage() {
     setDateTo('')
     setSearchTerm('')
   }
+
+  /**
+   * Merges optimistic pending entries with real server data.
+   * Optimistic entries float to the top (most recent first).
+   */
+  const visibleTransactions: (Transaction | OptimisticTransaction)[] = [
+    ...optimisticEntries,
+    ...transactions,
+  ]
 
   return (
     <div className="min-h-screen bg-background">
@@ -274,7 +240,7 @@ export function HistoryPage() {
               value={filterAsset}
               onChange={(e) => setFilterAsset(e.target.value)}
             >
-              {ASSET_OPTIONS.map((a) => (
+              {['all', 'XLM', 'USDC', 'AQUA'].map((a) => (
                 <option key={a} value={a}>
                   {a === 'all' ? 'All assets' : a}
                 </option>
@@ -353,7 +319,16 @@ export function HistoryPage() {
 
       {/* Transactions List */}
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {filteredTransactions.length === 0 ? (
+        {isLoading ? (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">Loading transactions…</p>
+          </div>
+        ) : fetchError ? (
+          <div className="text-center py-12">
+            <p className="text-red-500 mb-3">{fetchError}</p>
+            <Button variant="outline" size="sm" onClick={loadFirstPage}>Retry</Button>
+          </div>
+        ) : visibleTransactions.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-muted-foreground mb-2">No transactions found</p>
             <p className="text-sm text-muted-foreground">
@@ -375,7 +350,7 @@ export function HistoryPage() {
                 {isLoadingMore ? 'Loading more transactions…' : 'Scroll to load more'}
               </div>
             )}
-            {!hasMore && visibleTransactions.length > 0 && (
+            {!hasMore && transactions.length > 0 && (
               <div className="flex justify-center py-4 text-sm text-muted-foreground">
                 You&apos;ve reached the end of the history.
               </div>
