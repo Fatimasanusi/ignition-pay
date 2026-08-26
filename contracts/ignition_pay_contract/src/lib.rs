@@ -10,6 +10,14 @@ const AUTHORIZATIONS_KEY: &str = "authorizations";
 const RATE_LIMIT_KEY: &str = "rate_limit";
 const KYC_STATUS_KEY: &str = "kyc_status";
 const PENDING_UPGRADE_KEY: &str = "pending_upgrade";
+const DEFAULT_MAX_STALENESS_SECONDS: u64 = 300;
+
+#[contracttype]
+#[derive(Clone)]
+pub struct PriceObservation {
+    pub price: u64,
+    pub timestamp: u64,
+}
 
 #[contract]
 pub struct IgnitionPayContract;
@@ -304,7 +312,8 @@ impl MultiOracleContract {
 
         env.storage().instance().set(&admin_key, &admin);
         env.storage().instance().set(&oracles_key, &oracles);
-        env.storage().instance().set(&"prices", &Map::<Symbol, Vec<u64>>::new(&env));
+        env.storage().instance().set(&"prices", &Map::<Symbol, Vec<PriceObservation>>::new(&env));
+        env.storage().instance().set(&"max_staleness", &DEFAULT_MAX_STALENESS_SECONDS);
     }
 
     pub fn add_oracle(&self, env: &Env, new_oracle: Address) {
@@ -335,22 +344,44 @@ impl MultiOracleContract {
             panic!("Caller is not a registered oracle");
         }
 
-        let mut prices: Map<Symbol, Vec<u64>> = env.storage().instance().get(&"prices").unwrap_or_else(|| Map::new(env));
+        let mut prices: Map<Symbol, Vec<PriceObservation>> = env.storage().instance().get(&"prices").unwrap_or_else(|| Map::new(env));
         let mut asset_prices = prices.get(asset.clone()).unwrap_or_else(|| Vec::new(env));
         
-        asset_prices.push_back(price);
+        asset_prices.push_back(PriceObservation { price, timestamp: env.ledger().timestamp() });
         prices.set(asset.clone(), asset_prices);
         env.storage().instance().set(&"prices", &prices);
     }
 
-    pub fn get_median_price(&self, env: &Env, asset: Symbol) -> u64 {
-        let prices: Map<Symbol, Vec<u64>> = env.storage().instance().get(&"prices").unwrap_or_else(|| Map::new(env));
-        let mut asset_prices = prices.get(asset.clone()).unwrap_or_else(|| panic!("No prices for asset"));
+    pub fn set_max_staleness(&self, env: &Env, max_staleness_seconds: u64) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        env.storage().instance().set(&"max_staleness", &max_staleness_seconds);
+    }
 
-        if asset_prices.is_empty() {
+    pub fn max_staleness(&self, env: Env) -> u64 {
+        env.storage().instance().get(&"max_staleness").unwrap_or(DEFAULT_MAX_STALENESS_SECONDS)
+    }
+
+    pub fn get_median_price(&self, env: &Env, asset: Symbol) -> u64 {
+        let prices: Map<Symbol, Vec<PriceObservation>> = env.storage().instance().get(&"prices").unwrap_or_else(|| Map::new(&env));
+        let observations = prices.get(asset.clone()).unwrap_or_else(|| panic!("No prices for asset"));
+
+        if observations.is_empty() {
             panic!("No prices available for this asset");
         }
 
+        let now = env.ledger().timestamp();
+        let max_staleness = self.max_staleness(env.clone());
+        let mut asset_prices: Vec<u64> = Vec::new(&env);
+        for observation in observations.iter() {
+            if observation.timestamp > now || now - observation.timestamp > max_staleness {
+                continue;
+            }
+            asset_prices.push_back(observation.price);
+        }
+        if asset_prices.is_empty() {
+            panic!("All prices are stale");
+        }
         asset_prices.sort();
         let mid = asset_prices.len() / 2;
         asset_prices.get(mid).unwrap_or(0)
@@ -481,5 +512,154 @@ impl PausableContract {
         let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
         admin.require_auth();
         env.storage().instance().set(&"paused", &false);
+    }
+}
+
+#[contract]
+pub struct DelegationContract;
+
+#[contractimpl]
+impl DelegationContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&"admin") {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&"admin", &admin);
+        env.storage().instance().set(&"power", &Map::<Address, i128>::new(&env));
+        env.storage().instance().set(&"delegates", &Map::<Address, Address>::new(&env));
+    }
+
+    pub fn set_voting_power(&self, env: &Env, voter: Address, power: i128) {
+        let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        if power < 0 {
+            panic!("Voting power cannot be negative");
+        }
+        let mut powers: Map<Address, i128> = env.storage().instance().get(&"power").unwrap_or_else(|| Map::new(env));
+        powers.set(voter, power);
+        env.storage().instance().set(&"power", &powers);
+    }
+
+    pub fn delegate(&self, env: &Env, delegator: Address, representative: Address) {
+        delegator.require_auth();
+        if delegator == representative {
+            panic!("Cannot delegate to self");
+        }
+
+        let delegates: Map<Address, Address> = env.storage().instance().get(&"delegates").unwrap_or_else(|| Map::new(env));
+        let mut cursor = representative.clone();
+        for _ in 0..100 {
+            if cursor == delegator {
+                panic!("Delegation cycle detected");
+            }
+            match delegates.get(cursor.clone()) {
+                Some(next) => cursor = next,
+                None => break,
+            }
+        }
+        let mut updated = delegates;
+        updated.set(delegator, representative);
+        env.storage().instance().set(&"delegates", &updated);
+    }
+
+    pub fn clear_delegation(&self, env: &Env, delegator: Address) {
+        delegator.require_auth();
+        let mut delegates: Map<Address, Address> = env.storage().instance().get(&"delegates").unwrap_or_else(|| Map::new(env));
+        delegates.remove(delegator);
+        env.storage().instance().set(&"delegates", &delegates);
+    }
+
+    pub fn get_delegate(env: Env, delegator: Address) -> Option<Address> {
+        let delegates: Map<Address, Address> = env.storage().instance().get(&"delegates").unwrap_or_else(|| Map::new(&env));
+        delegates.get(delegator)
+    }
+
+    pub fn get_voting_power(env: Env, representative: Address) -> i128 {
+        let powers: Map<Address, i128> = env.storage().instance().get(&"power").unwrap_or_else(|| Map::new(&env));
+        let delegates: Map<Address, Address> = env.storage().instance().get(&"delegates").unwrap_or_else(|| Map::new(&env));
+        let mut total = powers.get(representative.clone()).unwrap_or(0);
+        for (voter, power) in powers.iter() {
+            let mut cursor = voter;
+            for _ in 0..100 {
+                match delegates.get(cursor.clone()) {
+                    Some(next) => {
+                        if next == representative {
+                            total = total.checked_add(power).unwrap_or_else(|| panic!("Voting power overflow"));
+                            break;
+                        }
+                        cursor = next;
+                    }
+                    None => break,
+                }
+            }
+        }
+        total
+    }
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct LockedQuote {
+    pub creator: Address,
+    pub sell_asset: Address,
+    pub buy_asset: Address,
+    pub sell_amount: i128,
+    pub buy_amount: i128,
+    pub price: i128,
+    pub expires_at: u64,
+    pub executed: bool,
+}
+
+#[contract]
+pub struct QuoteLockContract;
+
+#[contractimpl]
+impl QuoteLockContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&"admin") {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&"admin", &admin);
+        env.storage().instance().set(&"quotes", &Map::<Symbol, LockedQuote>::new(&env));
+    }
+
+    pub fn lock_quote(&self, env: &Env, id: Symbol, creator: Address, sell_asset: Address, buy_asset: Address, sell_amount: i128, buy_amount: i128, price: i128, expires_at: u64) {
+        creator.require_auth();
+        if sell_amount <= 0 || buy_amount <= 0 || price <= 0 {
+            panic!("Quote amounts and price must be positive");
+        }
+        if expires_at <= env.ledger().timestamp() {
+            panic!("Quote expiry must be in the future");
+        }
+        let mut quotes: Map<Symbol, LockedQuote> = env.storage().instance().get(&"quotes").unwrap_or_else(|| Map::new(env));
+        if quotes.contains_key(id.clone()) {
+            panic!("Quote already exists");
+        }
+        quotes.set(id, LockedQuote { creator, sell_asset, buy_asset, sell_amount, buy_amount, price, expires_at, executed: false });
+        env.storage().instance().set(&"quotes", &quotes);
+    }
+
+    pub fn execute_quote(&self, env: &Env, id: Symbol, executor: Address) -> LockedQuote {
+        executor.require_auth();
+        let mut quotes: Map<Symbol, LockedQuote> = env.storage().instance().get(&"quotes").unwrap_or_else(|| Map::new(env));
+        let mut quote = quotes.get(id.clone()).unwrap_or_else(|| panic!("Quote not found"));
+        if quote.executed {
+            panic!("Quote already executed");
+        }
+        if env.ledger().timestamp() >= quote.expires_at {
+            panic!("Quote has expired");
+        }
+        if quote.creator != executor {
+            panic!("Only quote creator can execute");
+        }
+        quote.executed = true;
+        quotes.set(id, quote.clone());
+        env.storage().instance().set(&"quotes", &quotes);
+        quote
+    }
+
+    pub fn get_quote(env: Env, id: Symbol) -> LockedQuote {
+        let quotes: Map<Symbol, LockedQuote> = env.storage().instance().get(&"quotes").unwrap_or_else(|| panic!("Quote not found"));
+        quotes.get(id).unwrap_or_else(|| panic!("Quote not found"))
     }
 }

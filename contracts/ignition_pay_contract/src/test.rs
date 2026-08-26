@@ -1,10 +1,13 @@
 #![cfg(test)]
 extern crate std;
 
-use crate::{IgnitionPayContract, IgnitionPayContractClient};
+use crate::{
+    DelegationContract, DelegationContractClient, IgnitionPayContract, IgnitionPayContractClient,
+    MultiOracleContract, MultiOracleContractClient, QuoteLockContract, QuoteLockContractClient,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
-    Address, Env,
+    Address, Env, Symbol, Vec,
 };
 
 fn create_contract(env: &Env) -> IgnitionPayContractClient {
@@ -147,4 +150,87 @@ fn test_has_pending_upgrade() {
 
     // Initially no pending upgrade
     assert_eq!(contract.has_pending_upgrade(), false);
+}
+
+#[test]
+#[should_panic(expected = "All prices are stale")]
+fn test_oracle_rejects_stale_prices() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(LedgerInfo {
+        timestamp: 1_000,
+        ..env.ledger().get()
+    });
+    let admin = Address::random(&env);
+    let oracle = Address::random(&env);
+    let contract = MultiOracleContractClient::new(
+        &env,
+        &env.register_contract(None, MultiOracleContract),
+    );
+
+    contract.initialize(&admin, &Vec::from_array(&env, [oracle.clone()]));
+    contract.push_price(&Symbol::new(&env, "XLM"), &100);
+    env.ledger().set(LedgerInfo {
+        timestamp: 1_301,
+        ..env.ledger().get()
+    });
+    contract.get_median_price(&Symbol::new(&env, "XLM"));
+}
+
+#[test]
+fn test_delegation_aggregates_power_and_can_be_cleared() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::random(&env);
+    let voter = Address::random(&env);
+    let representative = Address::random(&env);
+    let contract = DelegationContractClient::new(
+        &env,
+        &env.register_contract(None, DelegationContract),
+    );
+
+    contract.initialize(&admin);
+    contract.set_voting_power(&voter, &10);
+    contract.set_voting_power(&representative, &5);
+    contract.delegate(&voter, &representative);
+    assert_eq!(contract.get_voting_power(&representative), 15);
+    assert_eq!(contract.get_delegate(&voter), Some(representative.clone()));
+
+    contract.clear_delegation(&voter);
+    assert_eq!(contract.get_voting_power(&representative), 5);
+}
+
+#[test]
+fn test_quote_lock_is_one_time_and_preserves_terms() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(LedgerInfo {
+        timestamp: 1_000,
+        ..env.ledger().get()
+    });
+    let admin = Address::random(&env);
+    let creator = Address::random(&env);
+    let sell_asset = Address::random(&env);
+    let buy_asset = Address::random(&env);
+    let id = Symbol::new(&env, "quote-1");
+    let contract = QuoteLockContractClient::new(
+        &env,
+        &env.register_contract(None, QuoteLockContract),
+    );
+
+    contract.initialize(&admin);
+    contract.lock_quote(
+        &id,
+        &creator,
+        &sell_asset,
+        &buy_asset,
+        &100,
+        &250,
+        &2,
+        &1_100,
+    );
+    let executed = contract.execute_quote(&id, &creator);
+    assert_eq!(executed.sell_amount, 100);
+    assert_eq!(executed.buy_amount, 250);
+    assert_eq!(contract.get_quote(&id).executed, true);
 }
