@@ -68,17 +68,19 @@ export class TransactionsService {
   async getTransactions(
     query: GetTransactionsQueryDto,
   ): Promise<GetTransactionsResponseDto> {
-    const { cursor, limit, dateFrom, dateTo, status, type } = query;
-    const { page, limit, dateFrom, dateTo, status, type, asset, search } =
+    const { cursor, limit, dateFrom, dateTo, status, type, asset, search } =
       query;
-    const skip = (page - 1) * limit;
+
+    // ── Issue #411: Cursor pagination ──────────────────────────────────────
+    // When `cursor` is provided, fetch transactions created after the cursor
+    // (using created_at + id to avoid drift when new rows are inserted).
+    // When omitted, fall back to page-based offset pagination for backward
+    // compatibility.
+    const useCursorPagination = !!cursor;
 
     const where: Prisma.TransactionWhereInput = {};
 
     if (status) where.status = status as any;
-    // `type` maps to assetCode in the Transaction model (e.g. "XLM", "USDC").
-    if (type) where.assetCode = { equals: type, mode: 'insensitive' };
-
     // `type` was historically mapped to assetCode; `asset` is the new explicit filter.
     // When both are provided, `asset` wins.
     const assetFilter = asset ?? type;
@@ -93,62 +95,45 @@ export class TransactionsService {
       };
     }
 
-    // Cursor pagination: if a cursor (last seen donation ID) is provided,
-    // skip past it. Prisma's `cursor` + `skip: 1` pattern efficiently seeks
-    // to the row after the cursor without counting all preceding rows.
-    const cursorArg: Prisma.DonationFindManyArgs['cursor'] = cursor
-      ? { id: cursor }
-      : undefined;
-
-    const donations = await this.prisma.donation.findMany({
-      where,
-      select: {
-        id: true,
-        amount: true,
-        assetCode: true,
-        txHash: true,
-        status: true,
-        donorId: true,
-        campaignId: true,
-        donatedAt: true,
-        confirmedAt: true,
-        createdAt: true,
-      },
-      orderBy: { donatedAt: 'desc' },
-      // Fetch one extra row to determine if a next page exists.
-      take: limit + 1,
-      ...(cursorArg && { cursor: cursorArg, skip: 1 }),
-    });
-
-    const hasNextPage = donations.length > limit;
-    const page = donations.slice(0, limit);
-    const nextCursor = hasNextPage ? page[page.length - 1]?.id : null;
-
-    return {
-      data: page.map((d) => ({
-        ...d,
-        amount: Number(d.amount),
-        type: d.assetCode,
-      })),
-      nextCursor,
-      hasNextPage,
-      limit,
-    };
-    const [total, transactions] = await Promise.all([
-      this.prisma.transaction.count({ where }),
-      this.prisma.transaction.findMany({
     // Free-text search: match on txHash (exact, case-insensitive) or donorId
     // (partial, for counterparty address look-up).
     if (search) {
       where.OR = [
-        { txHash: { equals: search, mode: 'insensitive' } },
-        { donorId: { contains: search, mode: 'insensitive' } },
+        { stellarTxHash: { equals: search, mode: 'insensitive' } },
+        { fromWalletId: { contains: search, mode: 'insensitive' } },
+        { toWalletId: { contains: search, mode: 'insensitive' } },
       ];
     }
 
-    const [total, donations] = await Promise.all([
-      this.prisma.donation.count({ where }),
-      this.prisma.donation.findMany({
+    if (useCursorPagination) {
+      // Cursor pagination: seek past the cursor row using (createdAt, id)
+      // compound key to avoid drift when new rows are inserted during paging.
+      const cursorRow = await this.prisma.transaction.findUnique({
+        where: { id: cursor! },
+        select: { createdAt: true, id: true },
+      });
+
+      if (cursorRow) {
+        where.AND = [
+          ...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []),
+          {
+            OR: [
+              { createdAt: { lt: cursorRow.createdAt } },
+              {
+                createdAt: cursorRow.createdAt,
+                id: { lt: cursorRow.id },
+              },
+            ],
+          },
+        ];
+      }
+    }
+
+    const skip = useCursorPagination ? 0 : ((query as any).page - 1) * limit;
+
+    const [total, transactions] = await Promise.all([
+      this.prisma.transaction.count({ where }),
+      this.prisma.transaction.findMany({
         where,
         select: {
           id: true,
@@ -161,17 +146,23 @@ export class TransactionsService {
           createdAt: true,
           updatedAt: true,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
-        take: limit,
+        take: limit + 1, // fetch one extra to detect next page
       }),
     ]);
 
-    const data: TransactionDto[] = transactions.map((t) => ({
+    const hasNextPage = transactions.length > limit;
+    const page = transactions.slice(0, limit);
+    const nextCursor = hasNextPage ? page[page.length - 1]?.id ?? null : null;
+
+    const data: TransactionDto[] = page.map((t) => ({
       id: t.id,
       fromWalletId: t.fromWalletId,
       toWalletId: t.toWalletId,
-      amount: Number(t.amount),
+      // Issue #409: return amount as string to preserve Decimal precision.
+      // Stellar uses 7-decimal stroops; floats risk rounding drift.
+      amount: t.amount.toString(),
       assetCode: t.assetCode,
       stellarTxHash: t.stellarTxHash ?? null,
       status: t.status,
@@ -179,7 +170,7 @@ export class TransactionsService {
       updatedAt: t.updatedAt,
     }));
 
-    return { data, total, page, limit };
+    return { data, total, page: (query as any).page ?? 1, limit, nextCursor, hasNextPage };
   }
 
   /**
@@ -213,7 +204,7 @@ export class TransactionsService {
           id: existing.id,
           fromWalletId: existing.fromWalletId,
           toWalletId: existing.toWalletId,
-          amount: Number(existing.amount),
+          amount: existing.amount.toString(),
           assetCode: existing.assetCode,
           stellarTxHash: existing.stellarTxHash ?? null,
           status: existing.status,
@@ -240,7 +231,7 @@ export class TransactionsService {
         id: created.id,
         fromWalletId: created.fromWalletId,
         toWalletId: created.toWalletId,
-        amount: Number(created.amount),
+        amount: created.amount.toString(),
         assetCode: created.assetCode,
         stellarTxHash: created.stellarTxHash ?? null,
         status: created.status,
@@ -264,7 +255,7 @@ export class TransactionsService {
             id: existing.id,
             fromWalletId: existing.fromWalletId,
             toWalletId: existing.toWalletId,
-            amount: Number(existing.amount),
+            amount: existing.amount.toString(),
             assetCode: existing.assetCode,
             stellarTxHash: existing.stellarTxHash ?? null,
             status: existing.status,
