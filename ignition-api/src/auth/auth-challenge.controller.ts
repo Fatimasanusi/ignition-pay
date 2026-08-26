@@ -34,8 +34,13 @@ export class AuthChallengeController {
    * Returns the challenge text and its `expiresAt` ISO-8601 timestamp.
    * Clients SHOULD schedule a call to GET /auth/challenge/refresh before
    * the challenge expires to avoid a mid-flow rejection on slow networks.
+   *
+   * Issue #401 — The challenge endpoint is unauthenticated, so we apply a
+   * stricter per-IP throttle (3 requests / 60 s) to prevent brute-force
+   * enumeration of wallet addresses and exhaustion of signing capacity.
    */
   @Get('challenge')
+  @Throttle({ strict: { limit: 3, ttl: 60_000 } })
   @ApiOperation({ summary: 'Get authentication challenge for wallet address' })
   @ApiResponse({ status: 200, description: 'Returns challenge string' })
   @ApiResponse({
@@ -43,6 +48,7 @@ export class AuthChallengeController {
     description: 'Invalid Stellar wallet address',
     type: AuthErrorResponseDto,
   })
+  @ApiResponse({ status: 429, description: 'Too many requests — rate limit exceeded' })
   async getChallenge(
     @Query() query: ChallengeQueryDto,
   ): Promise<ChallengeResponse> {
@@ -64,6 +70,7 @@ export class AuthChallengeController {
    * waiting for a 401 and restarting the flow.
    */
   @Get('challenge/refresh')
+  @Throttle({ strict: { limit: 3, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Refresh an existing SEP-10 challenge before it expires',
     description:
@@ -72,6 +79,7 @@ export class AuthChallengeController {
   })
   @ApiResponse({ status: 200, description: 'Returns (possibly refreshed) challenge and expiry', type: ChallengeResponse })
   @ApiResponse({ status: 400, description: 'Invalid Stellar wallet address' })
+  @ApiResponse({ status: 429, description: 'Too many requests — rate limit exceeded' })
   async refreshChallenge(
     @Query() query: ChallengeQueryDto,
   ): Promise<ChallengeResponse> {

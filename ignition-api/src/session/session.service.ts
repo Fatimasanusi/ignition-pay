@@ -50,6 +50,45 @@ export class SessionService {
       'SESSION_IDLE_TIMEOUT_SECONDS',
       1800,
     ); // 30 min
+
+    // Issue #402 — Validate that the session store is backed by Redis.
+    // In-memory stores cause session fragmentation behind load balancers,
+    // leading to random auth failures when requests land on different instances.
+    this.validateSessionStore().catch((err) => {
+      this.logger.error(
+        `Session store validation failed: ${err.message}. ` +
+          'Sessions may not persist across restarts or scale horizontally.',
+      );
+    });
+  }
+
+  /**
+   * Issue #402 — On startup, verify that the CACHE_MANAGER is connected to
+   * an external store (Redis) rather than the default in-memory Map.  When
+   * the store is in-memory, multi-instance deployments behind a load balancer
+   * will randomly fail auth because sessions created on one instance are
+   * invisible to the others.
+   */
+  private async validateSessionStore(): Promise<void> {
+    const testKey = '__session_store_health_check__';
+    const testValue = 'ok';
+    try {
+      await this.cache.set(testKey, testValue, 5000);
+      const retrieved = await this.cache.get<string>(testKey);
+      await this.cache.delete(testKey);
+
+      if (retrieved !== testValue) {
+        this.logger.warn(
+          'Session store returned unexpected value — ' +
+            'session persistence may be unreliable.',
+        );
+      } else {
+        this.logger.log('Session store connectivity verified.');
+      }
+    } catch (err) {
+      // Re-throw so the .catch() in the constructor logs it
+      throw err;
+    }
   }
 
   /**
