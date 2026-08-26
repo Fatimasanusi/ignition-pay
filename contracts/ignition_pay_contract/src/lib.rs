@@ -516,6 +516,167 @@ impl PausableContract {
 }
 
 #[contract]
+pub struct WrappedAssetBridgeContract;
+
+#[contractimpl]
+impl WrappedAssetBridgeContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "native_token"), &Address::random(&env));
+        env.storage().instance().set(&Symbol::new(&env, "wrapped_balances"), &Map::<Address, Map<Address, i128>>::new(&env));
+        env.storage().instance().set(&Symbol::new(&env, "wrapped_tokens"), &Map::<Address, Address>::new(&env));
+    }
+
+    pub fn wrap(&self, env: &Env, caller: Address, native_asset: Address, amount: i128) {
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        caller.require_auth();
+
+        let mut wrapped_balances: Map<Address, Map<Address, i128>> =
+            env.storage().instance().get(&Symbol::new(&env, "wrapped_balances")).unwrap_or_else(|| Map::new(env));
+        let mut user_balances = wrapped_balances.get(caller.clone()).unwrap_or_else(|| Map::new(env));
+
+        let current = user_balances.get(native_asset.clone()).unwrap_or(0);
+        user_balances.set(native_asset.clone(), current + amount);
+        wrapped_balances.set(caller.clone(), user_balances);
+        env.storage().instance().set(&Symbol::new(&env, "wrapped_balances"), &wrapped_balances);
+
+        env.events().publish(
+            (Symbol::new(&env, "asset_wrapped"), &caller),
+            (native_asset, amount),
+        );
+    }
+
+    pub fn unwrap(&self, env: &Env, caller: Address, native_asset: Address, amount: i128) {
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        caller.require_auth();
+
+        let mut wrapped_balances: Map<Address, Map<Address, i128>> =
+            env.storage().instance().get(&Symbol::new(&env, "wrapped_balances")).unwrap_or_else(|| Map::new(env));
+        let mut user_balances = wrapped_balances.get(caller.clone()).unwrap_or_else(|| Map::new(env));
+
+        let current = user_balances.get(native_asset.clone()).unwrap_or(0);
+        if current < amount {
+            panic!("Insufficient wrapped balance");
+        }
+        user_balances.set(native_asset.clone(), current - amount);
+        wrapped_balances.set(caller.clone(), user_balances);
+        env.storage().instance().set(&Symbol::new(&env, "wrapped_balances"), &wrapped_balances);
+
+        env.events().publish(
+            (Symbol::new(&env, "asset_unwrapped"), &caller),
+            (native_asset, amount),
+        );
+    }
+
+    pub fn get_wrapped_balance(env: Env, holder: Address, native_asset: Address) -> i128 {
+        let wrapped_balances: Map<Address, Map<Address, i128>> =
+            env.storage().instance().get(&Symbol::new(&env, "wrapped_balances")).unwrap_or_else(|| Map::new(&env));
+        let user_balances = wrapped_balances.get(holder).unwrap_or_else(|| Map::new(&env));
+        user_balances.get(native_asset).unwrap_or(0)
+    }
+
+    pub fn register_wrapped_token(&self, env: &Env, native_asset: Address, wrapped_token: Address) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut wrapped_tokens: Map<Address, Address> =
+            env.storage().instance().get(&Symbol::new(&env, "wrapped_tokens")).unwrap_or_else(|| Map::new(env));
+        wrapped_tokens.set(native_asset, wrapped_token);
+        env.storage().instance().set(&Symbol::new(&env, "wrapped_tokens"), &wrapped_tokens);
+    }
+
+    pub fn get_wrapped_token(env: Env, native_asset: Address) -> Option<Address> {
+        let wrapped_tokens: Map<Address, Address> =
+            env.storage().instance().get(&Symbol::new(&env, "wrapped_tokens")).unwrap_or_else(|| Map::new(&env));
+        wrapped_tokens.get(native_asset)
+    }
+}
+
+#[contract]
+pub struct TokenMetadataContract;
+
+#[contractimpl]
+impl TokenMetadataContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "metadata"), &Map::<Address, Symbol>::new(&env));
+        env.storage().instance().set(&Symbol::new(&env, "icons"), &Map::<Address, Symbol>::new(&env));
+        env.storage().instance().set(&Symbol::new(&env, "descriptions"), &Map::<Address, Symbol>::new(&env));
+    }
+
+    pub fn set_metadata(&self, env: &Env, asset: Address, name: Symbol, icon: Symbol, description: Symbol) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut metadata: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "metadata")).unwrap_or_else(|| Map::new(env));
+        metadata.set(asset.clone(), name);
+        env.storage().instance().set(&Symbol::new(&env, "metadata"), &metadata);
+
+        let mut icons: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "icons")).unwrap_or_else(|| Map::new(env));
+        icons.set(asset.clone(), icon);
+        env.storage().instance().set(&Symbol::new(&env, "icons"), &icons);
+
+        let mut descriptions: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "descriptions")).unwrap_or_else(|| Map::new(env));
+        descriptions.set(asset, description);
+        env.storage().instance().set(&Symbol::new(&env, "descriptions"), &descriptions);
+    }
+
+    pub fn get_name(env: Env, asset: Address) -> Option<Symbol> {
+        let metadata: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "metadata")).unwrap_or_else(|| Map::new(&env));
+        metadata.get(asset)
+    }
+
+    pub fn get_icon(env: Env, asset: Address) -> Option<Symbol> {
+        let icons: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "icons")).unwrap_or_else(|| Map::new(&env));
+        icons.get(asset)
+    }
+
+    pub fn get_description(env: Env, asset: Address) -> Option<Symbol> {
+        let descriptions: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "descriptions")).unwrap_or_else(|| Map::new(&env));
+        descriptions.get(asset)
+    }
+
+    pub fn has_metadata(env: Env, asset: Address) -> bool {
+        let metadata: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "metadata")).unwrap_or_else(|| Map::new(&env));
+        metadata.get(asset).is_some()
+    }
+
+    pub fn remove_metadata(&self, env: &Env, asset: Address) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut metadata: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "metadata")).unwrap_or_else(|| Map::new(env));
+        metadata.set(asset.clone(), Symbol::new(&env, ""));
+
+        let mut icons: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "icons")).unwrap_or_else(|| Map::new(env));
+        icons.set(asset.clone(), Symbol::new(&env, ""));
+
+        let mut descriptions: Map<Address, Symbol> =
+            env.storage().instance().get(&Symbol::new(&env, "descriptions")).unwrap_or_else(|| Map::new(env));
+        descriptions.set(asset, Symbol::new(&env, ""));
+
+        env.storage().instance().set(&Symbol::new(&env, "metadata"), &metadata);
+        env.storage().instance().set(&Symbol::new(&env, "icons"), &icons);
+        env.storage().instance().set(&Symbol::new(&env, "descriptions"), &descriptions);
 pub struct DelegationContract;
 
 #[contractimpl]
@@ -598,6 +759,13 @@ impl DelegationContract {
 }
 
 #[contracttype]
+#[derive(Clone, PartialEq)]
+pub struct Proposal {
+    pub id: u32,
+    pub author: Address,
+    pub title: Symbol,
+    pub start_time: u64,
+    pub end_time: u64,
 #[derive(Clone)]
 pub struct LockedQuote {
     pub creator: Address,
@@ -611,6 +779,188 @@ pub struct LockedQuote {
 }
 
 #[contract]
+pub struct GovernanceContract;
+
+#[contractimpl]
+impl GovernanceContract {
+    pub fn initialize(env: Env, admin: Address, governance_token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "governance_token"), &governance_token);
+        env.storage().instance().set(&Symbol::new(&env, "proposal_count"), &0u32);
+        env.storage().instance().set(&Symbol::new(&env, "quorum_bps"), &1000u32);
+        env.storage().instance().set(&Symbol::new(&env, "proposals"), &Map::<u32, Proposal>::new(&env));
+        env.storage().instance().set(&Symbol::new(&env, "votes_for"), &Map::<u32, i128>::new(&env));
+        env.storage().instance().set(&Symbol::new(&env, "votes_against"), &Map::<u32, i128>::new(&env));
+        env.storage().instance().set(&Symbol::new(&env, "has_voted"), &Map::<(u32, Address), bool>::new(&env));
+    }
+
+    pub fn create_proposal(&self, env: &Env, author: Address, title: Symbol, duration: u64) {
+        author.require_auth();
+
+        let current_time = env.ledger().timestamp();
+        let mut proposal_count: u32 = env.storage().instance().get(&Symbol::new(&env, "proposal_count")).unwrap_or(0);
+        let id = proposal_count + 1;
+
+        let proposal = Proposal {
+            id,
+            author: author.clone(),
+            title: title.clone(),
+            start_time: current_time,
+            end_time: current_time + duration,
+            executed: false,
+        };
+
+        let mut proposals: Map<u32, Proposal> =
+            env.storage().instance().get(&Symbol::new(&env, "proposals")).unwrap_or_else(|| Map::new(env));
+        proposals.set(id, proposal);
+        env.storage().instance().set(&Symbol::new(&env, "proposals"), &proposals);
+        env.storage().instance().set(&Symbol::new(&env, "proposal_count"), &id);
+
+        let mut votes_for: Map<u32, i128> =
+            env.storage().instance().get(&Symbol::new(&env, "votes_for")).unwrap_or_else(|| Map::new(env));
+        votes_for.set(id, 0);
+        env.storage().instance().set(&Symbol::new(&env, "votes_for"), &votes_for);
+
+        let mut votes_against: Map<u32, i128> =
+            env.storage().instance().get(&Symbol::new(&env, "votes_against")).unwrap_or_else(|| Map::new(env));
+        votes_against.set(id, 0);
+        env.storage().instance().set(&Symbol::new(&env, "votes_against"), &votes_against);
+
+        env.events().publish(
+            (Symbol::new(&env, "proposal_created"), &author),
+            (id, title),
+        );
+    }
+
+    pub fn cast_vote(&self, env: &Env, proposal_id: u32, voter: Address, in_favor: bool) {
+        voter.require_auth();
+
+        let proposals: Map<u32, Proposal> =
+            env.storage().instance().get(&Symbol::new(&env, "proposals")).unwrap_or_else(|| Map::new(env));
+        let proposal = proposals.get(proposal_id).unwrap_or_else(|| panic!("Proposal not found"));
+
+        let current_time = env.ledger().timestamp();
+        if current_time < proposal.start_time || current_time > proposal.end_time {
+            panic!("Voting period is not active");
+        }
+
+        let has_voted: Map<(u32, Address), bool> =
+            env.storage().instance().get(&Symbol::new(&env, "has_voted")).unwrap_or_else(|| Map::new(env));
+        if has_voted.get((proposal_id, voter.clone())).unwrap_or(false) {
+            panic!("Voter has already voted on this proposal");
+        }
+
+        let governance_token: Address = env.storage().instance().get(&Symbol::new(&env, "governance_token")).unwrap();
+        let vote_weight: i128 = env.invoke_contract(&governance_token, &Symbol::new(&env, "balance"), (&voter,));
+
+        if vote_weight <= 0 {
+            panic!("Voter has no governance tokens");
+        }
+
+        if in_favor {
+            let mut votes_for: Map<u32, i128> =
+                env.storage().instance().get(&Symbol::new(&env, "votes_for")).unwrap_or_else(|| Map::new(env));
+            let current = votes_for.get(proposal_id).unwrap_or(0);
+            votes_for.set(proposal_id, current + vote_weight);
+            env.storage().instance().set(&Symbol::new(&env, "votes_for"), &votes_for);
+        } else {
+            let mut votes_against: Map<u32, i128> =
+                env.storage().instance().get(&Symbol::new(&env, "votes_against")).unwrap_or_else(|| Map::new(env));
+            let current = votes_against.get(proposal_id).unwrap_or(0);
+            votes_against.set(proposal_id, current + vote_weight);
+            env.storage().instance().set(&Symbol::new(&env, "votes_against"), &votes_against);
+        }
+
+        let mut has_voted_mut: Map<(u32, Address), bool> =
+            env.storage().instance().get(&Symbol::new(&env, "has_voted")).unwrap_or_else(|| Map::new(env));
+        has_voted_mut.set((proposal_id, voter.clone()), true);
+        env.storage().instance().set(&Symbol::new(&env, "has_voted"), &has_voted_mut);
+
+        env.events().publish(
+            (Symbol::new(&env, "vote_cast"), &voter),
+            (proposal_id, in_favor, vote_weight),
+        );
+    }
+
+    pub fn execute_proposal(&self, env: &Env, proposal_id: u32) {
+        let mut proposals: Map<u32, Proposal> =
+            env.storage().instance().get(&Symbol::new(&env, "proposals")).unwrap_or_else(|| Map::new(env));
+        let mut proposal = proposals.get(proposal_id).unwrap_or_else(|| panic!("Proposal not found"));
+
+        if proposal.executed {
+            panic!("Proposal already executed");
+        }
+
+        let current_time = env.ledger().timestamp();
+        if current_time <= proposal.end_time {
+            panic!("Voting period has not ended");
+        }
+
+        let votes_for: Map<u32, i128> =
+            env.storage().instance().get(&Symbol::new(&env, "votes_for")).unwrap_or_else(|| Map::new(&env));
+        let votes_against: Map<u32, i128> =
+            env.storage().instance().get(&Symbol::new(&env, "votes_against")).unwrap_or_else(|| Map::new(&env));
+
+        let for_votes = votes_for.get(proposal_id).unwrap_or(0);
+        let against_votes = votes_against.get(proposal_id).unwrap_or(0);
+
+        if for_votes <= against_votes {
+            proposal.executed = true;
+            proposals.set(proposal_id, proposal);
+            env.storage().instance().set(&Symbol::new(&env, "proposals"), &proposals);
+            env.events().publish(
+                (Symbol::new(&env, "proposal_rejected"), &proposal.author),
+                (proposal_id, for_votes, against_votes),
+            );
+            return;
+        }
+
+        proposal.executed = true;
+        proposals.set(proposal_id, proposal);
+        env.storage().instance().set(&Symbol::new(&env, "proposals"), &proposals);
+
+        env.events().publish(
+            (Symbol::new(&env, "proposal_executed"), &proposal.author),
+            (proposal_id, for_votes, against_votes),
+        );
+    }
+
+    pub fn get_proposal(env: Env, proposal_id: u32) -> Proposal {
+        let proposals: Map<u32, Proposal> =
+            env.storage().instance().get(&Symbol::new(&env, "proposals")).unwrap_or_else(|| Map::new(&env));
+        proposals.get(proposal_id).unwrap_or_else(|| panic!("Proposal not found"))
+    }
+
+    pub fn get_vote_tally(env: Env, proposal_id: u32) -> (i128, i128) {
+        let votes_for: Map<u32, i128> =
+            env.storage().instance().get(&Symbol::new(&env, "votes_for")).unwrap_or_else(|| Map::new(&env));
+        let votes_against: Map<u32, i128> =
+            env.storage().instance().get(&Symbol::new(&env, "votes_against")).unwrap_or_else(|| Map::new(&env));
+        let for_votes = votes_for.get(proposal_id).unwrap_or(0);
+        let against_votes = votes_against.get(proposal_id).unwrap_or(0);
+        (for_votes, against_votes)
+    }
+
+    pub fn has_voted(env: Env, proposal_id: u32, voter: Address) -> bool {
+        let has_voted_map: Map<(u32, Address), bool> =
+            env.storage().instance().get(&Symbol::new(&env, "has_voted")).unwrap_or_else(|| Map::new(&env));
+        has_voted_map.get((proposal_id, voter)).unwrap_or(false)
+    }
+
+    pub fn get_proposal_count(env: Env) -> u32 {
+        env.storage().instance().get(&Symbol::new(&env, "proposal_count")).unwrap_or(0)
+    }
+
+    pub fn set_quorum(&self, env: &Env, quorum_bps: u32) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(&env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        if quorum_bps > 10_000 {
+            panic!("Quorum must be between 0 and 10000 basis points");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "quorum_bps"), &quorum_bps);
 pub struct QuoteLockContract;
 
 #[contractimpl]
