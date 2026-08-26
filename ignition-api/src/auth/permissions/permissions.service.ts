@@ -3,8 +3,24 @@ import { Permission, ROLE_PERMISSIONS } from './permissions.map';
 
 @Injectable()
 export class PermissionsService {
+  /**
+   * Issue #407 — In-memory cache for per-role permission arrays.
+   *
+   * `ROLE_PERMISSIONS` is a static map that never changes at runtime, but
+   * every request was calling `getUserPermissions()` which creates a new
+   * array reference via the spread operator.  Caching the result avoids
+   * repeated allocations and makes `hasPermission()` a simple `includes()`
+   * on a frozen array.
+   */
+  private readonly rolePermissionsCache = new Map<string, readonly Permission[]>();
+
   getUserPermissions(role: string): Permission[] {
-    return ROLE_PERMISSIONS[role] ?? [];
+    let cached = this.rolePermissionsCache.get(role);
+    if (!cached) {
+      cached = Object.freeze([...(ROLE_PERMISSIONS[role] ?? [])]);
+      this.rolePermissionsCache.set(role, cached);
+    }
+    return cached as Permission[];
   }
 
   hasPermission(role: string, permission: Permission): boolean {
