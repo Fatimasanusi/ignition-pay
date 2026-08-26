@@ -15,6 +15,8 @@ export interface SessionMetadata {
   lastSeenAt: number;
   ipAddress?: string;
   userAgent?: string;
+  /** Issue #405 — Device fingerprint for session binding. */
+  deviceFingerprint?: string;
 }
 
 /** Prefix for individual session hash keys: session:{sessionId} */
@@ -123,6 +125,8 @@ export class SessionService {
     role: string;
     ipAddress?: string;
     userAgent?: string;
+    /** Issue #405 — Device fingerprint for session binding. */
+    deviceFingerprint?: string;
   }): Promise<SessionMetadata> {
     const sessionId = this.generateSessionId();
     const now = Date.now();
@@ -140,6 +144,7 @@ export class SessionService {
       lastSeenAt: now,
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
+      deviceFingerprint: params.deviceFingerprint,
     };
 
     // Persist session data

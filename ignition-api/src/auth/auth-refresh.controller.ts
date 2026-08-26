@@ -2,12 +2,15 @@ import {
   Controller,
   Post,
   Body,
+  Req,
   HttpStatus,
   HttpCode,
   UseFilters,
+  Logger,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBody, ApiResponse } from '@nestjs/swagger';
+import { Request } from 'express';
 import { AuthTokenService } from './auth-token.service';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { LoginResponseDto } from '../users/dto/login.dto';
@@ -19,6 +22,8 @@ import { AuthErrorResponseDto } from '../common/dto/error-response.dto';
 @UseFilters(AuthExceptionFilter)
 @Throttle({ default: { limit: 10, ttl: 60_000 } })
 export class AuthRefreshController {
+  private readonly logger = new Logger(AuthRefreshController.name);
+
   constructor(private readonly tokenService: AuthTokenService) {}
 
   @Post('refresh')
@@ -42,7 +47,33 @@ export class AuthRefreshController {
     description: 'Service temporarily unavailable',
     type: AuthErrorResponseDto,
   })
-  async refresh(@Body() dto: RefreshTokenDto): Promise<LoginResponseDto> {
-    return this.tokenService.validateAndRotate(dto.refreshToken);
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+  ): Promise<LoginResponseDto> {
+    // Issue #406 — Audit logging: record every refresh attempt (success and
+    // failure) so incident forensics can trace token-rotation abuse.
+    const ip = req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+    const userAgent = (req.headers['user-agent'] as string) ?? 'unknown';
+
+    this.logger.log(
+      `Refresh token request from ${ip} (${userAgent})`,
+    );
+
+    try {
+      const result = await this.tokenService.validateAndRotate(dto.refreshToken);
+
+      this.logger.log(
+        `Refresh token succeeded for user=${result.user?.id ?? 'unknown'} ` +
+          `from ${ip}`,
+      );
+
+      return result;
+    } catch (err: any) {
+      this.logger.warn(
+        `Refresh token FAILED from ${ip}: ${err.message}`,
+      );
+      throw err;
+    }
   }
 }
