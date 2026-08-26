@@ -45,7 +45,6 @@ export function SettingsPage() {
     { id: '2', device: 'Safari on iPhone', ip: '192.168.1.2', lastActive: '2 hours ago', current: false },
   ])
   const { preferences, save, saving } = usePreferences()
-  const { mode } = useTheme()
 
   const mockSeedPhrase =
     'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
