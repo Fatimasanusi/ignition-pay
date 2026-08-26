@@ -147,6 +147,7 @@ export async function fetchAnchorHistory(
   const response = await fetch(url, {
     method: 'GET',
     signal: composed,
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
   })
 
