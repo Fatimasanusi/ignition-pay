@@ -70,7 +70,8 @@ export class TransactionDto {
   id: string;
   fromWalletId: string;
   toWalletId: string;
-  amount: number;
+  /** Amount as string to preserve Decimal(20,7) precision (Issue #409) */
+  amount: string;
   assetCode: string;
   stellarTxHash: string | null;
   status: string;
@@ -83,6 +84,8 @@ export class GetTransactionsResponseDto {
   /** Cursor to pass as `cursor` on the next request. Null when no more pages. */
   nextCursor: string | null;
   hasNextPage: boolean;
+  total: number;
+  page: number;
   limit: number;
 }
 
