@@ -8,6 +8,7 @@ import { TransactionRow } from '@/components/transaction-row'
 import { useOptimisticTransactions } from '@/features/history/state'
 import { fetchTransactions } from '@/features/history/services'
 import type { Transaction, OptimisticTransaction } from '@/features/history/models'
+import { useToast } from '@/components/ui/toast'
 
 const PAGE_SIZE = 10
 const STATUS_OPTIONS = ['all', 'confirmed', 'pending'] as const
@@ -15,6 +16,7 @@ type StatusOption = (typeof STATUS_OPTIONS)[number]
 
 export function HistoryPage() {
   const { optimisticEntries } = useOptimisticTransactions()
+  const toast = useToast()
 
   const [filterType, setFilterType] = useState<'all' | 'sent' | 'received'>('all')
   const [filterAsset, setFilterAsset] = useState<string>('all')
@@ -73,11 +75,13 @@ export function HistoryPage() {
       setHasMore(result.hasNextPage)
     } catch (err: any) {
       if (err?.name === 'AbortError') return
-      setFetchError('Failed to load transactions. Please try again.')
+      const message = 'Failed to load transactions. Please try again.'
+      setFetchError(message)
+      toast.add({ title: 'Unable to load transactions', description: message, type: 'error' })
     } finally {
       if (!controller.signal.aborted) setIsLoading(false)
     }
-  }, [buildQueryArgs])
+  }, [buildQueryArgs, toast])
 
   /**
    * Load the next page and append to the existing list.
@@ -102,11 +106,13 @@ export function HistoryPage() {
       setHasMore(result.hasNextPage)
     } catch (err: any) {
       if (err?.name === 'AbortError') return
-      setFetchError('Failed to load more transactions.')
+      const message = 'Failed to load more transactions.'
+      setFetchError(message)
+      toast.add({ title: 'Unable to load more transactions', description: message, type: 'error' })
     } finally {
       if (!controller.signal.aborted) setIsLoadingMore(false)
     }
-  }, [buildQueryArgs, nextCursor, isLoadingMore])
+  }, [buildQueryArgs, nextCursor, isLoadingMore, toast])
 
   // Reload from page 1 whenever filters change
   useEffect(() => {
