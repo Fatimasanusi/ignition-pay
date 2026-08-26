@@ -1,7 +1,6 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, Map};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Map, Symbol, Vec};
 use crate::MultiOracleContractClient;
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Symbol, Vec, Map};
 
 const MAX_CALLS_PER_LEDGER: u32 = 5;
 const CONTRACT_VERSION: &str = "0.1.0";
@@ -63,7 +62,7 @@ impl IgnitionPayContract {
     }
 
     /// Authorize a user. Requires admin auth and KYC completion.
-    pub fn authorize(env: Env, user: Address) {
+    pub fn authorize(&self, env: Env, user: Address) {
         let admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
         admin.require_auth();
 
@@ -80,7 +79,7 @@ impl IgnitionPayContract {
     }
 
     /// Revoke authorization for a user. Only callable by admin.
-    pub fn revoke(env: Env, user: Address) {
+    pub fn revoke(&self, env: Env, user: Address) {
         let admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
         admin.require_auth();
 
@@ -97,6 +96,196 @@ impl IgnitionPayContract {
     pub fn is_authorized(env: Env, user: Address) -> bool {
         let authorizations: Vec<Address> = env.storage().instance().get(&Symbol::new(&env, AUTHORIZATIONS_KEY)).unwrap_or_else(|| Vec::new(&env));
         authorizations.contains(&user)
+    }
+
+    pub fn version(env: Env) -> Symbol {
+        env.storage().instance().get(&Symbol::new(&env, VERSION_KEY)).unwrap_or_else(|| panic!("Version not set"))
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        env.storage().instance().set(&Symbol::new(&env, PENDING_UPGRADE_KEY), &new_wasm_hash);
+        env.events().publish((Symbol::new(&env, "upgrade_initiated"), &admin), &new_wasm_hash);
+    }
+
+    pub fn apply_upgrade(env: Env) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let new_wasm_hash: BytesN<32> = env.storage().instance().get(&Symbol::new(&env, PENDING_UPGRADE_KEY)).unwrap_or_else(|| panic!("No pending upgrade"));
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&Symbol::new(&env, VERSION_KEY), &Symbol::new(&env, "0.2.0"));
+        env.storage().instance().remove(&Symbol::new(&env, PENDING_UPGRADE_KEY));
+        env.events().publish((Symbol::new(&env, "upgrade_applied"), &admin), &new_wasm_hash);
+    }
+
+    pub fn has_pending_upgrade(env: Env) -> bool {
+        env.storage().instance().has(&Symbol::new(&env, PENDING_UPGRADE_KEY))
+    }
+
+    pub fn transfer_admin(env: Env, new_admin: Address) {
+        let current_admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
+        current_admin.require_auth();
+        if current_admin == new_admin {
+            panic!("New admin must be different from current admin");
+        }
+        env.storage().instance().set(&Symbol::new(&env, ADMIN_KEY), &new_admin);
+        env.events().publish((Symbol::new(&env, "admin_transferred"), &current_admin), &new_admin);
+    }
+}
+#[contract]
+pub struct AssetAllowlistContract;
+
+#[contractimpl]
+impl AssetAllowlistContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "assets"), &Map::<Address, bool>::new(&env));
+    }
+
+    pub fn add_asset(&self, env: &Env, asset: Address) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut assets: Map<Address, bool> = env.storage().instance().get(&Symbol::new(env, "assets")).unwrap_or_else(|| Map::new(env));
+        assets.set(asset, true);
+        env.storage().instance().set(&Symbol::new(env, "assets"), &assets);
+    }
+
+    pub fn remove_asset(&self, env: &Env, asset: Address) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut assets: Map<Address, bool> = env.storage().instance().get(&Symbol::new(env, "assets")).unwrap_or_else(|| Map::new(env));
+        assets.set(asset, false);
+        env.storage().instance().set(&Symbol::new(env, "assets"), &assets);
+    }
+
+    pub fn is_asset_allowed(env: Env, asset: Address) -> bool {
+        let assets: Map<Address, bool> = env.storage().instance().get(&Symbol::new(&env, "assets")).unwrap_or_else(|| Map::new(&env));
+        assets.get(asset).unwrap_or(false)
+    }
+}
+
+#[contract]
+pub struct TrustlineManagerContract;
+
+#[contractimpl]
+impl TrustlineManagerContract {
+    pub fn initialize(env: Env, admin: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "trustlines"), &Map::<(Address, Address), bool>::new(&env));
+    }
+
+    pub fn add_trustline(&self, env: &Env, asset: Address, account: Address) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut trustlines: Map<(Address, Address), bool> = env.storage().instance().get(&Symbol::new(env, "trustlines")).unwrap_or_else(|| Map::new(env));
+        trustlines.set((asset, account), true);
+        env.storage().instance().set(&Symbol::new(env, "trustlines"), &trustlines);
+    }
+
+    pub fn remove_trustline(&self, env: &Env, asset: Address, account: Address) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut trustlines: Map<(Address, Address), bool> = env.storage().instance().get(&Symbol::new(env, "trustlines")).unwrap_or_else(|| Map::new(env));
+        trustlines.set((asset, account), false);
+        env.storage().instance().set(&Symbol::new(env, "trustlines"), &trustlines);
+    }
+
+    pub fn has_trustline(env: Env, asset: Address, account: Address) -> bool {
+        let trustlines: Map<(Address, Address), bool> = env.storage().instance().get(&Symbol::new(&env, "trustlines")).unwrap_or_else(|| Map::new(&env));
+        trustlines.get((asset, account)).unwrap_or(false)
+    }
+}
+
+#[contract]
+pub struct Sep41TokenRouterContract;
+
+#[contractimpl]
+impl Sep41TokenRouterContract {
+    pub fn transfer(env: Env, token: Address, from: Address, to: Address, amount: i128) {
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        from.require_auth();
+        env.invoke_contract::<()>(&token, &Symbol::new(&env, "transfer"), (from, to, amount));
+    }
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct Milestone {
+    pub recipient: Address,
+    pub amount: i128,
+    pub released_bps: u32,
+}
+
+#[contract]
+pub struct EscrowContract;
+
+#[contractimpl]
+impl EscrowContract {
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(&Symbol::new(&env, "milestones"), &Map::<u32, Milestone>::new(&env));
+    }
+
+    pub fn create_milestone(&self, env: &Env, id: u32, recipient: Address, amount: i128) {
+        let admin: Address = env.storage().instance().get(&Symbol::new(env, "admin")).unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        let mut milestones: Map<u32, Milestone> = env.storage().instance().get(&Symbol::new(env, "milestones")).unwrap_or_else(|| Map::new(env));
+        if milestones.contains_key(id) {
+            panic!("Milestone already exists");
+        }
+        milestones.set(id, Milestone { recipient, amount, released_bps: 0 });
+        env.storage().instance().set(&Symbol::new(env, "milestones"), &milestones);
+    }
+
+    pub fn fund_milestone(&self, env: &Env, id: u32, funder: Address) {
+        funder.require_auth();
+        let milestones: Map<u32, Milestone> = env.storage().instance().get(&Symbol::new(env, "milestones")).unwrap_or_else(|| Map::new(env));
+        if !milestones.contains_key(id) {
+            panic!("Milestone not found");
+        }
+        let milestone = milestones.get(id).unwrap();
+        let token: Address = env.storage().instance().get(&Symbol::new(env, "token")).unwrap();
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(&token, &Symbol::new(env, "transfer"), (funder, escrow, milestone.amount));
+    }
+
+    pub fn release_milestone(&self, env: &Env, id: u32, percentage_bps: u32) {
+        if percentage_bps == 0 || percentage_bps > 10_000 {
+            panic!("Percentage must be between 1 and 10000 basis points");
+        }
+        let mut milestones: Map<u32, Milestone> = env.storage().instance().get(&Symbol::new(env, "milestones")).unwrap_or_else(|| Map::new(env));
+        let mut milestone = milestones.get(id).unwrap_or_else(|| panic!("Milestone not found"));
+        if percentage_bps <= milestone.released_bps {
+            panic!("Release percentage must increase");
+        }
+        let release_amount = milestone.amount * (percentage_bps - milestone.released_bps) as i128 / 10_000;
+        let token: Address = env.storage().instance().get(&Symbol::new(env, "token")).unwrap();
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(&token, &Symbol::new(env, "transfer"), (escrow, milestone.recipient.clone(), release_amount));
+        milestone.released_bps = percentage_bps;
+        milestones.set(id, milestone);
+        env.storage().instance().set(&Symbol::new(env, "milestones"), &milestones);
+    }
+
+    pub fn get_milestone(env: Env, id: u32) -> Milestone {
+        let milestones: Map<u32, Milestone> = env.storage().instance().get(&Symbol::new(&env, "milestones")).unwrap_or_else(|| Map::new(&env));
+        milestones.get(id).unwrap_or_else(|| panic!("Milestone not found"))
     }
 }
 
@@ -292,68 +481,5 @@ impl PausableContract {
         let admin: Address = env.storage().instance().get(&"admin").unwrap_or_else(|| panic!("Admin not set"));
         admin.require_auth();
         env.storage().instance().set(&"paused", &false);
-    }
-}
-
-    /// Get the current contract version.
-    pub fn version(env: Env) -> Symbol {
-        env.storage().instance().get(&Symbol::new(&env, VERSION_KEY)).unwrap_or_else(|| panic!("Version not set"))
-    }
-
-    /// Initiate a contract upgrade. Only callable by admin.
-    /// This stores the new WASM hash and creates a pending upgrade record.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        let admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
-        admin.require_auth();
-
-        // Store the pending upgrade
-        env.storage().instance().set(&Symbol::new(&env, PENDING_UPGRADE_KEY), &new_wasm_hash);
-
-        // Emit upgrade initiated event
-        let topics = (Symbol::new(&env, "upgrade_initiated"), &admin);
-        env.events().publish(topics, &new_wasm_hash);
-    }
-
-    /// Apply a pending upgrade. Only callable by admin.
-    /// This actually performs the WASM upgrade using Soroban's built-in mechanism.
-    pub fn apply_upgrade(env: Env) {
-        let admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
-        admin.require_auth();
-
-        let new_wasm_hash: BytesN<32> = env.storage().instance().get(&Symbol::new(&env, PENDING_UPGRADE_KEY)).unwrap_or_else(|| panic!("No pending upgrade"));
-
-        // Perform the actual upgrade using Soroban's upgradeable contract feature
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
-
-        // Update version - in production, parse and increment semver properly
-        env.storage().instance().set(&Symbol::new(&env, VERSION_KEY), &Symbol::new(&env, "0.2.0"));
-
-        // Clear pending upgrade
-        env.storage().instance().remove(&Symbol::new(&env, PENDING_UPGRADE_KEY));
-
-        // Emit upgrade applied event
-        let topics = (Symbol::new(&env, "upgrade_applied"), &admin);
-        env.events().publish(topics, &new_wasm_hash);
-    }
-
-    /// Check if there's a pending upgrade.
-    pub fn has_pending_upgrade(env: Env) -> bool {
-        env.storage().instance().has(&Symbol::new(&env, PENDING_UPGRADE_KEY))
-    }
-
-    /// Transfer admin role to a new address. Only callable by current admin.
-    pub fn transfer_admin(env: Env, new_admin: Address) {
-        let current_admin: Address = env.storage().instance().get(&Symbol::new(&env, ADMIN_KEY)).unwrap_or_else(|| panic!("Admin not set"));
-        current_admin.require_auth();
-
-        if current_admin == new_admin {
-            panic!("New admin must be different from current admin");
-        }
-
-        env.storage().instance().set(&Symbol::new(&env, ADMIN_KEY), &new_admin);
-
-        // Emit admin transfer event
-        let topics = (Symbol::new(&env, "admin_transferred"), &current_admin);
-        env.events().publish(topics, &new_admin);
     }
 }
