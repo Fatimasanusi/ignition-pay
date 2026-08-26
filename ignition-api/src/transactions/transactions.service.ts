@@ -19,7 +19,7 @@ export class TransactionsService {
   async getTransactions(
     query: GetTransactionsQueryDto,
   ): Promise<GetTransactionsResponseDto> {
-    const { page, limit, dateFrom, dateTo, status, type, asset, search } =
+    const { cursor, limit, dateFrom, dateTo, status, type, asset, search } =
       query;
 
     // ── Issue #411: Cursor pagination ──────────────────────────────────────
@@ -55,6 +55,30 @@ export class TransactionsService {
         { toWalletId: { contains: search, mode: 'insensitive' } },
       ];
     }
+
+    // Fetch one extra row so we can tell whether another page exists
+    // without running a separate COUNT query.
+    const transactions = await this.prisma.transaction.findMany({
+      where,
+      select: {
+        id: true,
+        fromWalletId: true,
+        toWalletId: true,
+        amount: true,
+        assetCode: true,
+        stellarTxHash: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      // When a cursor is supplied, start after that record.
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+    });
+
+    const hasNextPage = transactions.length > limit;
+    const page = hasNextPage ? transactions.slice(0, limit) : transactions;
 
     if (useCursorPagination) {
       // Cursor pagination: seek past the cursor row using (createdAt, id)
@@ -121,7 +145,10 @@ export class TransactionsService {
       updatedAt: t.updatedAt,
     }));
 
-    return { data, total, page: (query as any).page ?? 1, limit, nextCursor, hasNextPage };
+    const nextCursor = hasNextPage ? (page[page.length - 1]?.id ?? null) : null;
+
+    return { data, nextCursor, hasNextPage, limit, total, page: (query as any).page ?? 1, limit, nextCursor, hasNextPage };
+   
   }
 
   /**
