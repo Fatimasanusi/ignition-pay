@@ -26,6 +26,8 @@ import { PermissionsGuard } from '../auth/permissions/permissions.guard';
 import { Permission } from '../auth/permissions/permissions.map';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 
 interface JwtUser {
   sub: string;
@@ -53,7 +55,10 @@ export class ApiKeysController {
   })
   @ApiOperation({ summary: 'Create a new API key' })
   @ApiResponse({ status: 201, description: 'API key successfully created' })
-  async create(@Req() req: Request & { user: JwtUser }) {
+  async create(
+    @Body() body: CreateApiKeyDto,
+    @Req() req: Request & { user: JwtUser },
+  ) {
     const rawKey = `sk_${randomBytes(32).toString('hex')}`;
     const prefix = rawKey.slice(0, 12);
     const keyHash = createHash('sha256').update(rawKey).digest('hex');
@@ -74,7 +79,7 @@ export class ApiKeysController {
     const apiKey = await this.prisma.apiKey.create({
       data: {
         userId: req.user.sub,
-        name: `API Key ${new Date().toISOString().slice(0, 10)}`,
+        name: body.name ?? `API Key ${new Date().toISOString().slice(0, 10)}`,
         keyHash,
         prefix,
         scope: 'read',
@@ -121,13 +126,17 @@ export class ApiKeysController {
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        rotationOfId: true,
+        rotationExpiresAt: true,
       },
       orderBy: {
         createdAt: 'desc',
       },
     });
 
-    return { apiKeys };
+    return { apiKeys: apiKeys.map((key) => this.toSummary(key)) };
   }
 
   @Get('admin/users/:userId')
@@ -153,6 +162,8 @@ export class ApiKeysController {
         updatedAt: true,
         lastUsedAt: true,
         expiresAt: true,
+        rotationOfId: true,
+        rotationExpiresAt: true,
       },
       orderBy: {
         createdAt: 'desc',
@@ -161,10 +172,41 @@ export class ApiKeysController {
 
     return {
       userId,
-      apiKeys: apiKeys.map((apiKey) => ({
-        ...apiKey,
-        status: apiKey.isActive ? 'active' : 'revoked',
-      })),
+      apiKeys: apiKeys.map((key) => this.toSummary(key)),
+    };
+  }
+
+  /**
+   * Map a raw ApiKey row to its public summary shape, adding a lifecycle
+   * `status`: `active`, `rotating` (old key kept alive during the rotation
+   * grace period), or `revoked`.
+   */
+  private toSummary(apiKey: {
+    id: string;
+    name: string;
+    prefix: string;
+    scope: string;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    lastUsedAt?: Date | null;
+    expiresAt?: Date | null;
+    rotationOfId?: string | null;
+    rotationExpiresAt?: Date | null;
+  }) {
+    const isRotating =
+      apiKey.isActive &&
+      apiKey.rotationOfId !== null &&
+      apiKey.rotationExpiresAt !== null &&
+      apiKey.rotationExpiresAt! > new Date();
+
+    return {
+      ...apiKey,
+      status: !apiKey.isActive
+        ? 'revoked'
+        : isRotating
+          ? 'rotating'
+          : 'active',
     };
   }
 
@@ -174,7 +216,7 @@ export class ApiKeysController {
   @ApiResponse({ status: 404, description: 'API key not found' })
   async update(
     @Param('id') id: string,
-    @Body() body: { name?: string },
+    @Body() body: UpdateApiKeyDto,
     @Req() req: Request & { user: JwtUser },
   ) {
     const apiKey = await this.prisma.apiKey.findFirst({
@@ -201,10 +243,14 @@ export class ApiKeysController {
         isActive: true,
         createdAt: true,
         updatedAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        rotationOfId: true,
+        rotationExpiresAt: true,
       },
     });
 
-    return updated;
+    return this.toSummary(updated);
   }
 
   @Post(':id/rotate')

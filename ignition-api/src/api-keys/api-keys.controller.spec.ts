@@ -43,13 +43,16 @@ describe('ApiKeysController', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     });
 
-    const result = await controller.create({
-      user: {
-        sub: 'user-1',
-        walletAddress: 'GABC',
-        role: 'USER',
-      },
-    } as never);
+    const result = await controller.create(
+      {},
+      {
+        user: {
+          sub: 'user-1',
+          walletAddress: 'GABC',
+          role: 'USER',
+        },
+      } as never,
+    );
 
     expect(prisma.apiKey.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -82,6 +85,35 @@ describe('ApiKeysController', () => {
     );
   });
 
+  it('creates a new API key with a custom name', async () => {
+    prisma.apiKey.findFirst.mockResolvedValue(null);
+    prisma.apiKey.create.mockResolvedValue({
+      id: 'api-key-2',
+      prefix: 'sk_abcdef12',
+      scope: 'read',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    await controller.create(
+      { name: 'Production Key' },
+      {
+        user: {
+          sub: 'user-1',
+          walletAddress: 'GABC',
+          role: 'USER',
+        },
+      } as never,
+    );
+
+    expect(prisma.apiKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: 'Production Key',
+        }),
+      }),
+    );
+  });
+
   it('rejects creating a new API key when an active key already uses the generated prefix', async () => {
     prisma.apiKey.findFirst.mockResolvedValue({
       id: 'api-key-existing',
@@ -90,13 +122,16 @@ describe('ApiKeysController', () => {
     });
 
     await expect(
-      controller.create({
-        user: {
-          sub: 'user-1',
-          walletAddress: 'GABC',
-          role: 'USER',
-        },
-      } as never),
+      controller.create(
+        {},
+        {
+          user: {
+            sub: 'user-1',
+            walletAddress: 'GABC',
+            role: 'USER',
+          },
+        } as never,
+      ),
     ).rejects.toThrow('An active API key already exists for this prefix');
   });
 
@@ -198,6 +233,8 @@ describe('ApiKeysController', () => {
         updatedAt: new Date('2026-01-01T00:00:00.000Z'),
         lastUsedAt: null,
         expiresAt: null,
+        rotationOfId: null,
+        rotationExpiresAt: null,
       },
     ]);
 
@@ -217,6 +254,41 @@ describe('ApiKeysController', () => {
         }),
       ],
     });
+  });
+
+  it('marks a key that is mid-rotation as rotating in the list response', async () => {
+    prisma.apiKey.findMany.mockResolvedValue([
+      {
+        id: 'api-key-1',
+        name: 'Production Key',
+        prefix: 'sk_12345678',
+        scope: 'read',
+        isActive: true,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        lastUsedAt: null,
+        expiresAt: null,
+        rotationOfId: 'api-key-2',
+        rotationExpiresAt: new Date(Date.now() + 86_400_000),
+      },
+    ]);
+
+    const result = await controller.list({
+      user: {
+        sub: 'user-1',
+        walletAddress: 'GABC',
+        role: 'USER',
+      },
+    } as never);
+
+    expect(result.apiKeys[0]).toEqual(
+      expect.objectContaining({
+        id: 'api-key-1',
+        status: 'rotating',
+        rotationOfId: 'api-key-2',
+        rotationExpiresAt: expect.any(Date),
+      }),
+    );
   });
 
   it('updates API key metadata', async () => {
@@ -240,13 +312,17 @@ describe('ApiKeysController', () => {
       updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     });
 
-    const result = await controller.update('api-key-1', { name: 'New Name' }, {
-      user: {
-        sub: 'user-1',
-        walletAddress: 'GABC',
-        role: 'USER',
-      },
-    } as never);
+    const result = await controller.update(
+      'api-key-1',
+      { name: 'New Name' },
+      {
+        user: {
+          sub: 'user-1',
+          walletAddress: 'GABC',
+          role: 'USER',
+        },
+      } as never,
+    );
 
     expect(prisma.apiKey.update).toHaveBeenCalledWith(
       expect.objectContaining({

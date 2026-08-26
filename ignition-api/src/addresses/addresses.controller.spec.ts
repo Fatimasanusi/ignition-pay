@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ExecutionContext } from '@nestjs/common';
 import { AddressesController } from './addresses.controller';
 import { AddressesService } from './addresses.service';
+import { ApiKeyGuard } from '../api-keys/api-key.guard';
+import { ApiKeyScopeGuard } from '../api-keys/api-key-scope.guard';
+
+const allowAllGuard = { canActivate: (_ctx: ExecutionContext) => true };
 
 describe('AddressesController', () => {
   let controller: AddressesController;
@@ -22,8 +27,6 @@ describe('AddressesController', () => {
     >
   >;
 
-
-  
   beforeEach(async () => {
     service = {
       create: jest.fn(),
@@ -43,7 +46,12 @@ describe('AddressesController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AddressesController],
       providers: [{ provide: AddressesService, useValue: service }],
-    }).compile();
+    })
+      .overrideGuard(ApiKeyGuard)
+      .useValue(allowAllGuard)
+      .overrideGuard(ApiKeyScopeGuard)
+      .useValue(allowAllGuard)
+      .compile();
 
     controller = module.get<AddressesController>(AddressesController);
   });
@@ -121,7 +129,8 @@ describe('AddressesController', () => {
   });
 
   describe('verify()', () => {
-    const VALID_ADDRESS = 'GBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
+    const VALID_ADDRESS =
+      'GBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
 
     it('should return valid: true for a valid Stellar address', () => {
       service.verifyAddress.mockReturnValue({
@@ -134,7 +143,8 @@ describe('AddressesController', () => {
     });
 
     it('should return valid: false with reason for a non-G prefix address', () => {
-      const badAddress = 'XBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
+      const badAddress =
+        'XBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
       service.verifyAddress.mockReturnValue({
         valid: false,
         address: badAddress,
@@ -159,10 +169,16 @@ describe('AddressesController', () => {
     });
 
     it('should always return HTTP 200 (method returns synchronously, not throwing)', () => {
-      service.verifyAddress.mockReturnValue({ valid: false, address: 'BAD', reason: 'test' });
+      service.verifyAddress.mockReturnValue({
+        valid: false,
+        address: 'BAD',
+        reason: 'test',
+      });
       // controller.verify is synchronous; if it doesn't throw, NestJS sends 200
       expect(() => controller.verify({ address: 'BAD' })).not.toThrow();
     });
+  });
+
   it('generateMemo() should call addressesService.generateMemo', async () => {
     const req = { user: { sub: 'user-123' } };
     const dto = { walletId: 'w-123', memoType: 'id' as any };

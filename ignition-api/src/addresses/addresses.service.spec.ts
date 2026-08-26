@@ -5,26 +5,34 @@ import {
 } from '@nestjs/common';
 import { AddressesService } from './addresses.service';
 
-jest.mock('@stellar/stellar-sdk', () => ({
-  __esModule: true,
-  default: {
-    Keypair: {
-      random: jest.fn(() => ({
-        publicKey: () =>
-          'GNEWADDRESS123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567',
-      })),
-    },
-  },
-  StrKey: {
-    isValidEd25519PublicKey: jest.fn((address: string) => {
-      // Simulate the real StrKey behaviour for test purposes:
-      // Only the well-known valid address passes; everything else fails.
-      return address === VALID_STELLAR_ADDRESS;
-    }),
-  },
-}));
+jest.mock('@stellar/stellar-sdk', () => {
+  const validStellarAddress =
+    'GBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
+  const validStellarAddress2 =
+    'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7';
 
-// A real Stellar Ed25519 public key (correct CRC-16 checksum).
+  const strKey = {
+    isValidEd25519PublicKey: jest.fn(
+      (address: string) =>
+        address === validStellarAddress || address === validStellarAddress2,
+    ),
+  };
+
+  return {
+    __esModule: true,
+    default: {
+      Keypair: {
+        random: jest.fn(() => ({
+          publicKey: () =>
+            'GNEWADDRESS123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567',
+        })),
+      },
+      StrKey: strKey,
+    },
+    StrKey: strKey,
+  };
+});
+
 const VALID_STELLAR_ADDRESS =
   'GBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ';
 
@@ -45,8 +53,14 @@ const mockWallet = {
   id: 'wallet-uuid',
   userId: 'user-uuid',
   network: 'STELLAR',
-  depositAddress: 'GABCDEF',
+  depositAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ123456789ABCDEFGHIJKLMNOPQRS',
+  label: null,
+  dailyLimit: 1000,
+  monthlyLimit: 10000,
   isActive: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  deletedAt: null,
 };
 
 const mockDepositAddress = {
@@ -84,10 +98,16 @@ const buildMockPrisma = (
       create: jest.fn().mockResolvedValue(mockAddress),
       update: jest.fn().mockResolvedValue(mockAddress),
       delete: jest.fn().mockResolvedValue(mockAddress),
+      upsert: jest.fn().mockResolvedValue(mockAddress),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     wallet: {
       findUnique: jest.fn().mockImplementation(({ where }: any) => {
         if (where.id === 'not-found') return null;
+        return 'wallet' in overrides ? overrides.wallet : mockWallet;
+      }),
+      findFirst: jest.fn().mockImplementation(({ where }: any) => {
+        if (where?.id === 'not-found' || where?.id === 'bad-id') return null;
         return 'wallet' in overrides ? overrides.wallet : mockWallet;
       }),
     },
@@ -95,6 +115,7 @@ const buildMockPrisma = (
       findUnique: jest.fn().mockImplementation(({ where }: any) => {
         return 'depositAddress' in overrides ? overrides.depositAddress : null;
       }),
+      findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation(({ data }: any) => {
         return 'created' in overrides
           ? overrides.created
@@ -102,6 +123,9 @@ const buildMockPrisma = (
       }),
       findMany: jest.fn().mockImplementation(({ where }: any) => {
         return [mockDepositAddress];
+      }),
+      update: jest.fn().mockImplementation(({ data }: any) => {
+        return { ...mockDepositAddress, ...data };
       }),
     },
   };
@@ -398,13 +422,17 @@ describe('AddressesService', () => {
     });
 
     it('returns valid: false when address does not start with G', () => {
-      const result = service.verifyAddress('XBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ');
+      const result = service.verifyAddress(
+        'XBZXN7PIRZGNMHGA7D3TLXWGABSIJHKRNM5Z7HCFVQ7WFMJDBJJLKGZ',
+      );
       expect(result.valid).toBe(false);
       expect(result.reason).toMatch(/must start with G/i);
     });
 
     it('returns valid: false for an M-address (muxed account, not Ed25519 key)', () => {
-      const result = service.verifyAddress('MA7QYNF7SOWQ3GLR2BGMZEHXR77GVDQK7JVZJZJZJZJZJZJZVVAAAAAAAAAAAPCIB');
+      const result = service.verifyAddress(
+        'MA7QYNF7SOWQ3GLR2BGMZEHXR77GVDQK7JVZJZJZJZJZJZJZVVAAAAAAAAAAAPCIB',
+      );
       expect(result.valid).toBe(false);
       expect(result.reason).toMatch(/must start with G/i);
     });
@@ -433,6 +461,9 @@ describe('AddressesService', () => {
       const addr = 'GBAD_CHECKSUM_ADDRESS';
       const result = service.verifyAddress(addr);
       expect(result.address).toBe(addr);
+    });
+  });
+
   describe('generateMemo', () => {
     it('generates a valid deposit memo for a wallet', async () => {
       const result = await service.generateMemo('user-uuid', {

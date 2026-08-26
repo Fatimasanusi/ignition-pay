@@ -7,12 +7,14 @@ import { createHash } from 'crypto';
 
 describe('ApiKeyGuard', () => {
   let guard: ApiKeyGuard;
-  let prisma: { apiKey: { findUnique: jest.Mock } };
+  let prisma: {
+    apiKey: { findUnique: jest.Mock; update: jest.Mock };
+  };
   let expirationService: { touchUsage: jest.Mock };
 
   beforeEach(async () => {
     prisma = {
-      apiKey: { findUnique: jest.fn() },
+      apiKey: { findUnique: jest.fn(), update: jest.fn() },
     };
     expirationService = {
       touchUsage: jest.fn().mockResolvedValue(undefined),
@@ -47,7 +49,7 @@ describe('ApiKeyGuard', () => {
     );
   });
 
-  it('should throw UnauthorizedException if API key record is missing or inactive', async () => {
+  it('should throw UnauthorizedException if API key record is missing', async () => {
     const context = {
       switchToHttp: () => ({
         getRequest: () => ({
@@ -59,10 +61,30 @@ describe('ApiKeyGuard', () => {
     prisma.apiKey.findUnique.mockResolvedValue(null);
 
     await expect(guard.canActivate(context)).rejects.toThrow(
-      new UnauthorizedException('Invalid or revoked API key'),
+      new UnauthorizedException('Invalid API key'),
     );
+  });
 
-    prisma.apiKey.findUnique.mockResolvedValue(null);
+  it('should throw UnauthorizedException if API key record is revoked', async () => {
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { 'x-api-key': 'my-key' },
+        }),
+      }),
+    } as unknown as ExecutionContext;
+
+    prisma.apiKey.findUnique.mockResolvedValue({
+      id: 'key-1',
+      isActive: false,
+      rotationOfId: null,
+      rotationExpiresAt: null,
+      user: {
+        id: 'user-1',
+        walletAddress: 'G123',
+        role: 'USER',
+      },
+    });
 
     await expect(guard.canActivate(context)).rejects.toThrow(
       new UnauthorizedException('Invalid or revoked API key'),
@@ -84,6 +106,9 @@ describe('ApiKeyGuard', () => {
       id: 'key-1',
       isActive: true,
       scope: 'ALL',
+      rotationOfId: null,
+      rotationExpiresAt: null,
+      expiresAt: null,
       user: {
         id: 'user-1',
         walletAddress: 'G123',
@@ -104,10 +129,73 @@ describe('ApiKeyGuard', () => {
     });
     const keyHash = createHash('sha256').update('my-key').digest('hex');
     expect(prisma.apiKey.findUnique).toHaveBeenCalledWith({
-      where: { keyHash, isActive: true },
+      where: { keyHash },
       include: {
         user: { select: { id: true, walletAddress: true, role: true } },
       },
     });
+  });
+
+  it('accepts the old key during the rotation grace period', async () => {
+    const req = {
+      headers: { 'x-api-key': 'old-key' },
+      user: null as any,
+    };
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => req,
+      }),
+    } as unknown as ExecutionContext;
+
+    prisma.apiKey.findUnique.mockResolvedValue({
+      id: 'old-key-1',
+      isActive: true,
+      scope: 'ALL',
+      rotationOfId: 'new-key-2',
+      rotationExpiresAt: new Date(Date.now() + 86_400_000),
+      expiresAt: null,
+      user: {
+        id: 'user-1',
+        walletAddress: 'G123',
+        role: 'USER',
+      },
+    });
+
+    const res = await guard.canActivate(context);
+
+    expect(res).toBe(true);
+    expect(req.user).toEqual(
+      expect.objectContaining({ apiKeyId: 'old-key-1', scope: 'ALL' }),
+    );
+  });
+
+  it('rejects the old key once the rotation grace period has expired', async () => {
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { 'x-api-key': 'old-key' },
+        }),
+      }),
+    } as unknown as ExecutionContext;
+
+    prisma.apiKey.findUnique.mockResolvedValue({
+      id: 'old-key-1',
+      isActive: true,
+      scope: 'ALL',
+      rotationOfId: 'new-key-2',
+      rotationExpiresAt: new Date(Date.now() - 1_000),
+      expiresAt: null,
+      user: {
+        id: 'user-1',
+        walletAddress: 'G123',
+        role: 'USER',
+      },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      new UnauthorizedException(
+        'API key rotation grace period has expired. Use your new key.',
+      ),
+    );
   });
 });
