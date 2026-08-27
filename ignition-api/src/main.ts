@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { initSentry } from './common/sentry/sentry.middleware';
 import { ValidationExceptionFilter } from './common/validation-exception.filter';
+import { ApiKeyExpirationService } from './api-key-expiration.service';
 
 async function bootstrap() {
   initSentry(process.env.SENTRY_DSN ?? '');
@@ -22,6 +23,10 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new ValidationExceptionFilter());
+
+  // Process any API key expirations missed while the worker was offline.
+  const apiKeyExpirationService = app.get(ApiKeyExpirationService);
+  await apiKeyExpirationService.expireApiKeys();
 
   const config = new DocumentBuilder()
     .setTitle('StellarAid API')
@@ -64,6 +69,6 @@ async function bootstrap() {
     expressApp.use('/admin/queues', serverAdapter.getRouter());
   }
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(process.env.PORT *|| 3000);
 }
 void bootstrap();

@@ -72,6 +72,8 @@ export default function RootLayout({
           <Toaster />
         </ToastProvider>
         {process.env.NODE_ENV === 'production' && <ConsentGate />}
+        {children}
+        <ConsentGate />
       </body>
     </html>
   )
