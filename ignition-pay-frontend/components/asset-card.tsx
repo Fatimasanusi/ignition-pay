@@ -1,5 +1,6 @@
 'use client'
 
+import { Badge } from '@/components/ui/badge'
 import { MASKED_AMOUNT } from '@/hooks/use-hide-balances'
 
 interface AssetCardProps {
@@ -38,9 +39,14 @@ export function AssetCard({
           </div>
         </div>
         {change24h !== undefined && (
-          <div className={`text-sm font-semibold ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
-            {isPositive ? '+' : ''}{change24h.toFixed(2)}%
-          </div>
+          <Badge
+            variant={isPositive ? 'success' : 'destructive'}
+            className="text-sm font-semibold border-transparent bg-transparent px-0 py-0"
+            aria-label={`24 hour change ${isPositive ? 'up' : 'down'} ${Math.abs(change24h).toFixed(2)} percent`}
+          >
+            {isPositive ? '+' : ''}
+            {change24h.toFixed(2)}%
+          </Badge>
         )}
       </div>
 

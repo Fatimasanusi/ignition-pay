@@ -53,15 +53,6 @@ export function useSep24Wizard() {
       interactiveTimeoutRef.current = null
     }
   }, [])
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-    if (abortRef.current) {
-      abortRef.current.abort()
-      abortRef.current = null
-    }
-  }, [])
 
   useEffect(() => {
     return () => clearPolling()
