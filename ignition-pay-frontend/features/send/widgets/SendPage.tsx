@@ -19,6 +19,7 @@ import { AssetAmountPicker } from '@/components/asset-amount-picker'
 import { validateAmount, type SendableAsset } from '@/features/send/models'
 import { checkTrustline, type TrustlineCheck } from '@/features/send/services'
 import { useOptimisticTransactions } from '@/features/history/state'
+import { useToast } from '@/components/ui/toast'
 
 const ADDRESS_KIND_LABELS = {
   publicKey: 'Stellar account',
@@ -43,6 +44,7 @@ const sendableAssets: SendableAsset[] = [
 
 export function SendPage() {
   const { addOptimisticEntry, reconcileEntry, removeOptimisticEntry } = useOptimisticTransactions()
+  const toast = useToast()
 
   const [step, setStep] = useState<'form' | 'review' | 'confirmed'>('form')
   const [recipientTouched, setRecipientTouched] = useState(false)
@@ -134,17 +136,25 @@ export function SendPage() {
         setOptimisticId(null)
         setStep('confirmed')
         setIsSubmitting(false)
+        toast.add({
+          title: 'Payment sent',
+          description: `${formData.amount} ${formData.asset} was sent successfully.`,
+          type: 'success',
+        })
       }, 1500)
 
       // Step 4: In real scenario, invalidate/refetch transaction list
       // await refetchTransactions()
-    } catch (error) {
+    } catch {
       // Step 5: Remove optimistic entry on failure
       removeOptimisticEntry(txId)
       setOptimisticId(null)
       setIsSubmitting(false)
-      // TODO: Show error toast
-      console.error('Transaction failed:', error)
+      toast.add({
+        title: 'Transaction failed',
+        description: 'Please try again.',
+        type: 'error',
+      })
     }
   }
 

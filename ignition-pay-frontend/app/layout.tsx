@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { ConsentGate } from '@/components/consent-gate'
+import { ToastProvider, Toaster } from '@/components/ui/toast'
 import './globals.css'
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
@@ -66,6 +67,11 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="font-sans antialiased bg-background text-foreground">
+        <ToastProvider>
+          {children}
+          <Toaster />
+        </ToastProvider>
+        {process.env.NODE_ENV === 'production' && <ConsentGate />}
         {children}
         <ConsentGate />
       </body>
