@@ -766,6 +766,10 @@ pub struct Proposal {
     pub title: Symbol,
     pub start_time: u64,
     pub end_time: u64,
+    pub executed: bool,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub struct LockedQuote {
     pub creator: Address,
@@ -961,6 +965,10 @@ impl GovernanceContract {
             panic!("Quorum must be between 0 and 10000 basis points");
         }
         env.storage().instance().set(&Symbol::new(&env, "quorum_bps"), &quorum_bps);
+    }
+}
+
+#[contract]
 pub struct QuoteLockContract;
 
 #[contractimpl]
@@ -1011,6 +1019,164 @@ impl QuoteLockContract {
     pub fn get_quote(env: Env, id: Symbol) -> LockedQuote {
         let quotes: Map<Symbol, LockedQuote> = env.storage().instance().get(&"quotes").unwrap_or_else(|| panic!("Quote not found"));
         quotes.get(id).unwrap_or_else(|| panic!("Quote not found"))
+    }
+}
+        }
+        quote.executed = true;
+        quotes.set(id, quote.clone());
+        env.storage().instance().set(&"quotes", &quotes);
+        quote
+    }
+
+    pub fn get_quote(env: Env, id: Symbol) -> LockedQuote {
+        let quotes: Map<Symbol, LockedQuote> = env.storage().instance().get(&"quotes").unwrap_or_else(|| panic!("Quote not found"));
+        quotes.get(id).unwrap_or_else(|| panic!("Quote not found"))
+    }
+}
+
+
+// =============================================================================
+// Issue #488: Core payment contract for on-chain XLM and asset transfers
+// with authorization, amount validation, and event emission.
+// =============================================================================
+
+const PAYMENT_TOKEN_KEY: &str = "payment_token";
+const PAYMENT_ADMIN_KEY: &str = "payment_admin";
+const PAYMENT_COUNT_KEY: &str = "payment_count";
+
+#[contract]
+pub struct PaymentContract;
+
+#[contractimpl]
+impl PaymentContract {
+    /// Initialize the payment contract with an admin and the token to transfer.
+    /// Must be called once after deployment before any other function.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, PAYMENT_ADMIN_KEY)) {
+            panic!("PaymentContract: already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, PAYMENT_ADMIN_KEY), &admin);
+        env.storage().instance().set(&Symbol::new(&env, PAYMENT_TOKEN_KEY), &token);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, PAYMENT_COUNT_KEY), &Map::<Address, u32>::new(&env));
+    }
+
+    /// Send `amount` units of the configured token from `sender` to `recipient`.
+    ///
+    /// - Requires `sender` authorization.
+    /// - Validates that `amount > 0`.
+    /// - Transfers via the token contract's `transfer` entry-point.
+    /// - Emits a `payment_sent` event carrying (sender, recipient, amount, memo).
+    pub fn send_payment(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        amount: i128,
+        memo: Symbol,
+    ) {
+        // Authorization & validation.
+        sender.require_auth();
+        if amount <= 0 {
+            panic!("PaymentContract: amount must be greater than zero");
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, PAYMENT_TOKEN_KEY))
+            .unwrap_or_else(|| panic!("PaymentContract: not initialized"));
+
+        // Transfer via the token contract.
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (sender.clone(), recipient.clone(), amount),
+        );
+
+        // Increment the sender's payment count.
+        Self::increment_payment_count(&env, &sender);
+
+        // Emit payment_sent event.
+        env.events().publish(
+            (Symbol::new(&env, "payment_sent"), sender.clone()),
+            (recipient, amount, memo),
+        );
+    }
+
+    /// Send `amounts[i]` units of the token from `sender` to each `recipients[i]`.
+    ///
+    /// - Requires `sender` authorization once for the whole batch.
+    /// - Validates that `recipients` and `amounts` are the same length.
+    /// - Validates that every amount > 0.
+    /// - Emits a single `batch_payment_sent` event on success.
+    pub fn batch_send(
+        env: Env,
+        sender: Address,
+        recipients: Vec<Address>,
+        amounts: Vec<i128>,
+    ) {
+        sender.require_auth();
+
+        if recipients.len() != amounts.len() {
+            panic!("PaymentContract: recipients and amounts length mismatch");
+        }
+        if recipients.is_empty() {
+            panic!("PaymentContract: recipients list must not be empty");
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, PAYMENT_TOKEN_KEY))
+            .unwrap_or_else(|| panic!("PaymentContract: not initialized"));
+
+        for i in 0..recipients.len() {
+            let recipient = recipients.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+            if amount <= 0 {
+                panic!("PaymentContract: each amount must be greater than zero");
+            }
+            env.invoke_contract::<()>(
+                &token,
+                &Symbol::new(&env, "transfer"),
+                (sender.clone(), recipient, amount),
+            );
+            Self::increment_payment_count(&env, &sender);
+        }
+
+        // Emit batch_payment_sent event.
+        env.events().publish(
+            (Symbol::new(&env, "batch_payment_sent"), sender.clone()),
+            (recipients, amounts),
+        );
+    }
+
+    /// Returns the total number of payments (individual + batch entries) made by `address`.
+    pub fn get_payment_count(env: Env, address: Address) -> u32 {
+        let counts: Map<Address, u32> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, PAYMENT_COUNT_KEY))
+            .unwrap_or_else(|| Map::new(&env));
+        counts.get(address).unwrap_or(0)
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    fn increment_payment_count(env: &Env, address: &Address) {
+        let mut counts: Map<Address, u32> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(env, PAYMENT_COUNT_KEY))
+            .unwrap_or_else(|| Map::new(env));
+        let current = counts.get(address.clone()).unwrap_or(0);
+        counts.set(address.clone(), current + 1);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(env, PAYMENT_COUNT_KEY), &counts);
     }
 }
 

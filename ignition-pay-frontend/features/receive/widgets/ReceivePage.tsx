@@ -1,21 +1,126 @@
 'use client'
 
-import { useState } from 'react'
-import { Copy, Download, Share2 } from 'lucide-react'
+// Issues #460 + #462:
+//   #460 – Remove MOCK_ADDRESS; derive the wallet address from a prop or
+//           sessionStorage (key: 'ignition:wallet:address') as a runtime fallback.
+//   #462 – Wire Share Address (navigator.share with clipboard fallback),
+//           add Copy Address + Memo combined button, wire Download QR.
+
+import { useState, useRef, useEffect } from 'react'
+import { Copy, Share2 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { QRCodeDisplay, type QRCodeDisplayHandle } from './QRCodeDisplay'
 
-const MOCK_ADDRESS = 'GBKXNRTZQVD6CNOQNRZVMJVQ4ZQ5K2NQXJ6K4VJKTQVJVQVJVQVJVQ'
+// ---------------------------------------------------------------------------
+// useWalletAddress – returns address from prop → sessionStorage → empty string
+// ---------------------------------------------------------------------------
+function useWalletAddress(addressProp?: string): string {
+  const [address, setAddress] = useState<string>(addressProp ?? '')
 
-export function ReceivePage() {
-  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    // Only run in the browser; prop takes precedence over sessionStorage.
+    if (typeof window === 'undefined') return
+    if (addressProp) {
+      setAddress(addressProp)
+      return
+    }
+    const stored = sessionStorage.getItem('ignition:wallet:address')
+    if (stored) setAddress(stored)
+  }, [addressProp])
+
+  return address
+}
+
+// ---------------------------------------------------------------------------
+// ReceivePage
+// ---------------------------------------------------------------------------
+
+interface ReceivePageProps {
+  /**
+   * The authenticated user's Stellar wallet address.
+   * When provided it takes precedence over the sessionStorage fallback.
+   */
+  address?: string
+}
+
+export function ReceivePage({ address: addressProp }: ReceivePageProps) {
+  const address = useWalletAddress(addressProp)
+
+  // Memo state – kept in sync with copy-all and share actions.
+  const [memo, setMemo] = useState('')
   const [showMemo, setShowMemo] = useState(false)
 
+  // Toast-style feedback flags.
+  const [copiedAddress, setCopiedAddress] = useState(false)
+  const [copiedAddressMemo, setCopiedAddressMemo] = useState(false)
+  const [shared, setShared] = useState(false)
+
+  // Ref handle that lets us call downloadQR() on the QRCodeDisplay component.
+  const qrHandleRef = useRef<QRCodeDisplayHandle | null>(null)
+
+  // -------------------------------------------------------------------------
+  // Clipboard helpers
+  // -------------------------------------------------------------------------
+
   const copyAddress = () => {
-    navigator.clipboard.writeText(MOCK_ADDRESS)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    navigator.clipboard.writeText(address).then(() => {
+      setCopiedAddress(true)
+      setTimeout(() => setCopiedAddress(false), 2000)
+    })
   }
+
+  const copyAddressAndMemo = () => {
+    const text = memo
+      ? `Address: ${address}\nMemo: ${memo}`
+      : `Address: ${address}`
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedAddressMemo(true)
+      setTimeout(() => setCopiedAddressMemo(false), 2000)
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Share Address – navigator.share with clipboard fallback (#462)
+  // -------------------------------------------------------------------------
+
+  const shareAddress = async () => {
+    const shareText = address + (memo ? ` Memo: ${memo}` : '')
+    const shareData: ShareData = {
+      title: 'My Stellar Address',
+      text: shareText,
+      url: window.location.href,
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share(shareData)
+        setShared(true)
+        setTimeout(() => setShared(false), 2000)
+      } catch (err) {
+        // User cancelled or browser rejected – fall through to clipboard copy.
+        console.warn('[ReceivePage] navigator.share rejected, falling back to clipboard:', err)
+        navigator.clipboard.writeText(shareText)
+      }
+    } else {
+      // Fallback: copy to clipboard when Web Share API is unavailable.
+      await navigator.clipboard.writeText(shareText)
+      setShared(true)
+      setTimeout(() => setShared(false), 2000)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Download QR – delegates to QRCodeDisplay via the handle ref
+  // -------------------------------------------------------------------------
+
+  const triggerDownloadQR = () => {
+    qrHandleRef.current?.downloadQR()
+  }
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
 
   return (
     <div className="min-h-screen bg-background">
@@ -39,20 +144,20 @@ export function ReceivePage() {
       {/* Main Content */}
       <div className="max-w-2xl mx-auto px-6 py-8">
         <div className="space-y-8">
-          {/* QR Code Section */}
+          {/* QR Code Section – #461: real scannable QR via QRCodeDisplay */}
           <div className="bg-card rounded-2xl border border-primary/30 p-8 flex flex-col items-center gap-6">
-            <div className="w-64 h-64 bg-white rounded-lg border-8 border-primary p-4 flex items-center justify-center">
-              <div className="grid grid-cols-7 gap-1 w-full h-full">
-                {Array(49)
-                  .fill(0)
-                  .map((_, i) => (
-                    <div
-                      key={i}
-                      className={`${Math.random() > 0.6 ? 'bg-black' : 'bg-white'}`}
-                    />
-                  ))}
+            {address ? (
+              /* #461 – real QR code rendered from the actual wallet address */
+              <QRCodeDisplay
+                address={address}
+                size={256}
+                handleRef={qrHandleRef}
+              />
+            ) : (
+              <div className="w-64 h-64 flex items-center justify-center rounded-lg border-8 border-primary bg-white text-muted-foreground text-sm text-center p-4">
+                No wallet address found. Please log in to see your QR code.
               </div>
-            </div>
+            )}
             <div className="text-center">
               <p className="text-muted-foreground text-sm">
                 Scan this QR code to receive a payment
@@ -69,30 +174,64 @@ export function ReceivePage() {
               <div className="relative">
                 <input
                   type="text"
-                  value={MOCK_ADDRESS}
+                  value={address || 'Loading address…'}
                   readOnly
+                  aria-label="Your Stellar wallet address"
                   className="w-full px-4 py-4 rounded-lg bg-muted/50 border border-border text-foreground font-mono text-sm pr-12"
                 />
                 <button
                   onClick={copyAddress}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
+                  disabled={!address}
+                  aria-label="Copy address to clipboard"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors disabled:opacity-40"
                 >
                   <Copy size={20} />
                 </button>
               </div>
-              {copied && <p className="text-xs text-primary mt-2">Address copied!</p>}
+              {copiedAddress && (
+                <p className="text-xs text-primary mt-2" role="status">
+                  Address copied!
+                </p>
+              )}
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <Button variant="outline" className="flex-1">
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-3 pt-2">
+              {/* Share Address – #462: navigator.share with clipboard fallback */}
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={shareAddress}
+                disabled={!address}
+                aria-label="Share wallet address"
+              >
                 <Share2 className="mr-2 h-4 w-4" />
-                Share Address
+                {shared ? 'Shared!' : 'Share Address'}
               </Button>
-              <Button variant="outline" className="flex-1">
-                <Download className="mr-2 h-4 w-4" />
+
+              {/* Download QR – delegates to QRCodeDisplay */}
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={triggerDownloadQR}
+                disabled={!address}
+                aria-label="Download QR code as PNG"
+              >
                 Download QR
               </Button>
             </div>
+
+            {/* Copy Address + Memo – #462 */}
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={copyAddressAndMemo}
+              disabled={!address}
+              aria-label="Copy address and memo to clipboard"
+            >
+              <Copy className="mr-2 h-4 w-4" />
+              {copiedAddressMemo ? 'Copied!' : 'Copy Address + Memo'}
+            </Button>
           </div>
 
           {/* Memo Section */}
@@ -102,6 +241,7 @@ export function ReceivePage() {
               <button
                 onClick={() => setShowMemo(!showMemo)}
                 className="text-sm text-primary hover:text-primary/80 transition-colors"
+                aria-expanded={showMemo}
               >
                 {showMemo ? 'Hide' : 'Show'}
               </button>
@@ -116,6 +256,9 @@ export function ReceivePage() {
                   type="text"
                   placeholder="Enter a payment memo (optional)"
                   maxLength={28}
+                  value={memo}
+                  onChange={(e) => setMemo(e.target.value)}
+                  aria-label="Payment memo"
                   className="w-full px-4 py-3 rounded-lg bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -176,4 +319,3 @@ export function ReceivePage() {
     </div>
   )
 }
-

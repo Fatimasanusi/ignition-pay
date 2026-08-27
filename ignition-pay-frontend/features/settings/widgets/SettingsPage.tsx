@@ -27,7 +27,10 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { useTheme } from '@/hooks/use-theme'
 import { ApiKeysSection } from './ApiKeysSection'
 
+import { useTranslation, type SupportedLocale } from '@/lib/i18n'
+
 export function SettingsPage() {
+  const { t, locale, setLocale } = useTranslation()
   const [showSeed, setShowSeed] = useState(false)
   const [copied, setCopied] = useState(false)
   const [displayName, setDisplayName] = useState('')
@@ -62,13 +65,13 @@ export function SettingsPage() {
         <div className="px-6 py-8 max-w-4xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 className="text-3xl font-bold text-foreground">Settings</h1>
+              <h1 className="text-3xl font-bold text-foreground">{t('settings.title')}</h1>
               <p className="text-muted-foreground mt-1">
-                Manage your wallet and account preferences
+                {t('settings.subtitle')}
               </p>
             </div>
             <Link href="/dashboard">
-              <Button variant="ghost">← Back</Button>
+              <Button variant="ghost">{t('common.back')}</Button>
             </Link>
           </div>
         </div>
@@ -418,14 +421,18 @@ export function SettingsPage() {
 
             <div className="flex items-center justify-between py-4">
               <div>
-                <p className="font-semibold text-foreground">Language</p>
-                <p className="text-sm text-muted-foreground">{preferences.locale === 'en' ? 'English' : preferences.locale === 'es' ? 'Spanish' : preferences.locale === 'fr' ? 'French' : preferences.locale}</p>
+                <p className="font-semibold text-foreground">{t('settings.language')}</p>
+                <p className="text-sm text-muted-foreground">
+                  {locale === 'en' ? 'English' : locale === 'es' ? 'Spanish' : locale === 'fr' ? 'French' : locale}
+                </p>
               </div>
               <select
-                value={preferences.locale}
-                onChange={(e) =>
-                  save({ ...preferences, locale: e.target.value })
-                }
+                value={locale}
+                onChange={(e) => {
+                  const newLoc = e.target.value as SupportedLocale
+                  setLocale(newLoc)
+                  save({ ...preferences, locale: newLoc })
+                }}
                 disabled={saving}
                 className="px-3 py-1 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:border-primary disabled:opacity-50"
               >
