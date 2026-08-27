@@ -1013,3 +1013,1436 @@ impl QuoteLockContract {
         quotes.get(id).unwrap_or_else(|| panic!("Quote not found"))
     }
 }
+
+// =============================================================================
+// Issue #493 — Milestone-release escrow logic
+// Locks funds per campaign milestone and releases them when conditions are met.
+// Status values: PENDING=0, ACTIVE=1, COMPLETED=2
+// =============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct MilestoneEscrowEntry {
+    pub recipient: Address,
+    pub amount: i128,
+    pub status: u32, // 0=PENDING, 1=ACTIVE, 2=COMPLETED
+}
+
+#[contract]
+pub struct MilestoneEscrowContract;
+
+#[contractimpl]
+impl MilestoneEscrowContract {
+    /// Initialize with an admin address and the token contract to use for transfers.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "milestones"),
+            &Map::<u32, MilestoneEscrowEntry>::new(&env),
+        );
+    }
+
+    /// Admin creates a milestone in PENDING status with a designated recipient and target amount.
+    pub fn create_milestone(env: Env, id: u32, recipient: Address, amount: i128) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        let mut milestones: Map<u32, MilestoneEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "milestones"))
+            .unwrap_or_else(|| Map::new(&env));
+        if milestones.contains_key(id) {
+            panic!("Milestone already exists");
+        }
+        milestones.set(
+            id,
+            MilestoneEscrowEntry {
+                recipient,
+                amount,
+                status: 0, // PENDING
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "milestones"), &milestones);
+    }
+
+    /// Funder transfers tokens to the contract for this milestone, activating it (status → ACTIVE).
+    pub fn lock_funds(env: Env, id: u32, funder: Address, amount: i128) {
+        funder.require_auth();
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        let mut milestones: Map<u32, MilestoneEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "milestones"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut entry = milestones
+            .get(id)
+            .unwrap_or_else(|| panic!("Milestone not found"));
+        if entry.status != 0 {
+            panic!("Milestone must be PENDING to lock funds");
+        }
+        if amount != entry.amount {
+            panic!("Must fund exact milestone amount");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (funder, escrow, amount),
+        );
+        entry.status = 1; // ACTIVE
+        milestones.set(id, entry);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "milestones"), &milestones);
+        env.events().publish(
+            (Symbol::new(&env, "milestone_locked"), id),
+            amount,
+        );
+    }
+
+    /// Admin marks a milestone COMPLETED and releases the escrowed funds to the recipient.
+    pub fn complete_milestone(env: Env, id: u32) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut milestones: Map<u32, MilestoneEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "milestones"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut entry = milestones
+            .get(id)
+            .unwrap_or_else(|| panic!("Milestone not found"));
+        if entry.status != 1 {
+            panic!("Milestone must be ACTIVE to complete");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, entry.recipient.clone(), entry.amount),
+        );
+        entry.status = 2; // COMPLETED
+        milestones.set(id, entry.clone());
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "milestones"), &milestones);
+        env.events().publish(
+            (Symbol::new(&env, "milestone_completed"), id),
+            entry.amount,
+        );
+    }
+
+    /// Returns the status of a milestone: 0=PENDING, 1=ACTIVE, 2=COMPLETED.
+    pub fn get_milestone_status(env: Env, id: u32) -> u32 {
+        let milestones: Map<u32, MilestoneEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "milestones"))
+            .unwrap_or_else(|| Map::new(&env));
+        milestones
+            .get(id)
+            .unwrap_or_else(|| panic!("Milestone not found"))
+            .status
+    }
+}
+
+// =============================================================================
+// Issue #494 — Dispute-triggered escrow freeze
+// Admin can freeze/unfreeze an escrow entry, blocking release while frozen.
+// Moves dispute enforcement from DB-only to on-chain.
+// =============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DisputeEscrowEntry {
+    pub depositor: Address,
+    pub amount: i128,
+    pub frozen: bool,
+}
+
+#[contract]
+pub struct DisputeEscrowContract;
+
+#[contractimpl]
+impl DisputeEscrowContract {
+    /// Initialize with an admin address and the token contract.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "escrows"),
+            &Map::<u32, DisputeEscrowEntry>::new(&env),
+        );
+    }
+
+    /// Depositor locks funds in the escrow. Entry starts unfrozen.
+    pub fn deposit(env: Env, id: u32, depositor: Address, amount: i128) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        let mut escrows: Map<u32, DisputeEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        if escrows.contains_key(id) {
+            panic!("Escrow already exists for this id");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (depositor.clone(), escrow, amount),
+        );
+        escrows.set(
+            id,
+            DisputeEscrowEntry {
+                depositor,
+                amount,
+                frozen: false,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "dispute_deposit"), id),
+            amount,
+        );
+    }
+
+    /// Admin freezes the escrow when a dispute is filed, blocking release.
+    pub fn freeze(env: Env, id: u32) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut escrows: Map<u32, DisputeEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        if entry.frozen {
+            panic!("Escrow already frozen");
+        }
+        entry.frozen = true;
+        escrows.set(id, entry);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "escrow_frozen"), id),
+            (),
+        );
+    }
+
+    /// Admin unfreezes the escrow once a dispute is resolved.
+    pub fn unfreeze(env: Env, id: u32) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut escrows: Map<u32, DisputeEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        if !entry.frozen {
+            panic!("Escrow is not frozen");
+        }
+        entry.frozen = false;
+        escrows.set(id, entry);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "escrow_unfrozen"), id),
+            (),
+        );
+    }
+
+    /// Releases funds to the given recipient. Reverts if the escrow is frozen.
+    pub fn release(env: Env, id: u32, recipient: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut escrows: Map<u32, DisputeEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        if entry.frozen {
+            panic!("Escrow is frozen due to an open dispute");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, recipient.clone(), entry.amount),
+        );
+        escrows.remove(id);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "dispute_released"), id),
+            entry.amount,
+        );
+    }
+
+    /// Returns whether the escrow for the given id is currently frozen.
+    pub fn is_frozen(env: Env, id: u32) -> bool {
+        let escrows: Map<u32, DisputeEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"))
+            .frozen
+    }
+}
+
+// =============================================================================
+// Issue #495 — Admin recovery for escrowed funds
+// A dedicated recovery_admin role (separate from the campaign admin) can
+// redirect escrowed funds if the campaign creator's key is lost.
+// =============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct RecoveryEscrowEntry {
+    pub depositor: Address,
+    pub amount: i128,
+}
+
+#[contract]
+pub struct AdminRecoveryEscrowContract;
+
+#[contractimpl]
+impl AdminRecoveryEscrowContract {
+    /// Initialize with a primary admin, a recovery admin, and the token contract.
+    /// The recovery_admin is a separate key with the sole power to redirect funds.
+    pub fn initialize(env: Env, admin: Address, recovery_admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "recovery_admin"), &recovery_admin);
+        env.storage().instance().set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "escrows"),
+            &Map::<u32, RecoveryEscrowEntry>::new(&env),
+        );
+    }
+
+    /// Depositor locks funds in the escrow.
+    pub fn deposit(env: Env, id: u32, depositor: Address, amount: i128) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        let mut escrows: Map<u32, RecoveryEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        if escrows.contains_key(id) {
+            panic!("Escrow already exists for this id");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (depositor.clone(), escrow, amount),
+        );
+        escrows.set(id, RecoveryEscrowEntry { depositor, amount });
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "recovery_deposit"), id),
+            amount,
+        );
+    }
+
+    /// Primary admin releases funds to an intended recipient under normal circumstances.
+    pub fn release(env: Env, id: u32, recipient: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut escrows: Map<u32, RecoveryEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, recipient.clone(), entry.amount),
+        );
+        escrows.remove(id);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "recovery_released"), id),
+            entry.amount,
+        );
+    }
+
+    /// Recovery admin redirects funds to a new recipient when the campaign creator's key is lost.
+    /// This function is exclusively callable by the recovery_admin, not the primary admin.
+    pub fn emergency_recover(env: Env, id: u32, new_recipient: Address) {
+        let recovery_admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "recovery_admin"))
+            .unwrap_or_else(|| panic!("Recovery admin not set"));
+        recovery_admin.require_auth();
+        let mut escrows: Map<u32, RecoveryEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, new_recipient.clone(), entry.amount),
+        );
+        escrows.remove(id);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "emergency_recovered"), id),
+            (entry.amount, new_recipient),
+        );
+    }
+
+    /// Recovery admin rotates to a new recovery_admin address for key-rotation purposes.
+    pub fn transfer_recovery_admin(env: Env, new_recovery_admin: Address) {
+        let recovery_admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "recovery_admin"))
+            .unwrap_or_else(|| panic!("Recovery admin not set"));
+        recovery_admin.require_auth();
+        if recovery_admin == new_recovery_admin {
+            panic!("New recovery admin must differ from current");
+        }
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "recovery_admin"), &new_recovery_admin);
+        env.events().publish(
+            (Symbol::new(&env, "recovery_admin_transferred"), &recovery_admin),
+            &new_recovery_admin,
+        );
+    }
+}
+
+// =============================================================================
+// Issue #496 — Escrow expiration / TTL
+// Each deposit carries an expires_at timestamp. After expiry, release() is
+// blocked and reclaim() lets the original depositor retrieve their funds,
+// preventing funds from being locked forever on abandoned campaigns.
+// =============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct ExpiringEscrowEntry {
+    pub depositor: Address,
+    pub amount: i128,
+    pub expires_at: u64,
+}
+
+#[contract]
+pub struct ExpiringEscrowContract;
+
+#[contractimpl]
+impl ExpiringEscrowContract {
+    /// Initialize with an admin address and the token contract.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "escrows"),
+            &Map::<u32, ExpiringEscrowEntry>::new(&env),
+        );
+    }
+
+    /// Depositor locks funds with an on-chain expiry timestamp.
+    /// expires_at must be strictly in the future (greater than current ledger timestamp).
+    pub fn deposit(env: Env, id: u32, depositor: Address, amount: i128, expires_at: u64) {
+        depositor.require_auth();
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        if expires_at <= env.ledger().timestamp() {
+            panic!("Expiry must be in the future");
+        }
+        let mut escrows: Map<u32, ExpiringEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        if escrows.contains_key(id) {
+            panic!("Escrow already exists for this id");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (depositor.clone(), escrow, amount),
+        );
+        escrows.set(
+            id,
+            ExpiringEscrowEntry {
+                depositor,
+                amount,
+                expires_at,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "expiring_deposit"), id),
+            (amount, expires_at),
+        );
+    }
+
+    /// Admin releases funds before expiry. Reverts if the escrow has already expired.
+    pub fn release(env: Env, id: u32, recipient: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+        let mut escrows: Map<u32, ExpiringEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        if env.ledger().timestamp() >= entry.expires_at {
+            panic!("Escrow has expired; use reclaim instead");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, recipient.clone(), entry.amount),
+        );
+        escrows.remove(id);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "expiring_released"), id),
+            entry.amount,
+        );
+    }
+
+    /// Original depositor reclaims funds after the TTL has elapsed.
+    /// Only callable by the original depositor, and only after expiry.
+    pub fn reclaim(env: Env, id: u32, original_depositor: Address) {
+        original_depositor.require_auth();
+        let mut escrows: Map<u32, ExpiringEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        if entry.depositor != original_depositor {
+            panic!("Only the original depositor can reclaim");
+        }
+        if env.ledger().timestamp() < entry.expires_at {
+            panic!("Escrow has not yet expired");
+        }
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, original_depositor.clone(), entry.amount),
+        );
+        escrows.remove(id);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "escrows"), &escrows);
+        env.events().publish(
+            (Symbol::new(&env, "expiring_reclaimed"), id),
+            entry.amount,
+        );
+    }
+
+    /// Returns true if the escrow TTL has elapsed.
+    pub fn is_expired(env: Env, id: u32) -> bool {
+        let escrows: Map<u32, ExpiringEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        let entry = escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"));
+        env.ledger().timestamp() >= entry.expires_at
+    }
+
+    /// Returns the expiry timestamp for the given escrow id.
+    pub fn get_expiry(env: Env, id: u32) -> u64 {
+        let escrows: Map<u32, ExpiringEscrowEntry> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "escrows"))
+            .unwrap_or_else(|| Map::new(&env));
+        escrows
+            .get(id)
+            .unwrap_or_else(|| panic!("Escrow not found"))
+            .expires_at
+    }
+}
+
+// ============================================================================
+// Issue #489: CampaignDonationEscrowContract
+// Holds donated funds on-chain per campaign and releases them to the campaign
+// creator only when the admin confirms milestone completion.
+// ============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct CampaignBalance {
+    pub amount: i128,
+}
+
+#[contract]
+pub struct CampaignDonationEscrowContract;
+
+#[contractimpl]
+impl CampaignDonationEscrowContract {
+    /// Initialize the escrow contract with an admin and the SEP-41 token to hold.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage().instance().set(&Symbol::new(&env, "admin"), &admin);
+        env.storage().instance().set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "balances"),
+            &Map::<Symbol, i128>::new(&env),
+        );
+    }
+
+    /// Donor transfers `amount` tokens into escrow, credited to `campaign_id`.
+    pub fn donate(env: Env, campaign_id: Symbol, donor: Address, amount: i128) {
+        if amount <= 0 {
+            panic!("Donation amount must be positive");
+        }
+        donor.require_auth();
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+
+        // Pull funds from donor into this contract
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (donor.clone(), escrow, amount),
+        );
+
+        // Update campaign balance
+        let mut balances: Map<Symbol, i128> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "balances"))
+            .unwrap_or_else(|| Map::new(&env));
+        let current = balances.get(campaign_id.clone()).unwrap_or(0);
+        balances.set(campaign_id.clone(), current + amount);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "balances"), &balances);
+
+        env.events().publish(
+            (Symbol::new(&env, "donation_received"), &donor),
+            (campaign_id, amount),
+        );
+    }
+
+    /// Admin releases the full escrowed balance for `campaign_id` to `creator`.
+    /// Called after milestone verification off-chain (or by a milestone contract).
+    pub fn release_to_campaign(env: Env, campaign_id: Symbol, creator: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut balances: Map<Symbol, i128> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "balances"))
+            .unwrap_or_else(|| Map::new(&env));
+        let balance = balances.get(campaign_id.clone()).unwrap_or(0);
+        if balance <= 0 {
+            panic!("No funds to release for campaign");
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let escrow = env.current_contract_address();
+
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (escrow, creator.clone(), balance),
+        );
+
+        // Zero out the balance
+        balances.set(campaign_id.clone(), 0_i128);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "balances"), &balances);
+
+        env.events().publish(
+            (Symbol::new(&env, "funds_released"), &admin),
+            (campaign_id, creator, balance),
+        );
+    }
+
+    /// Returns the current escrowed balance for a campaign.
+    pub fn get_balance(env: Env, campaign_id: Symbol) -> i128 {
+        let balances: Map<Symbol, i128> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "balances"))
+            .unwrap_or_else(|| Map::new(&env));
+        balances.get(campaign_id).unwrap_or(0)
+    }
+}
+
+// ============================================================================
+// Issue #490: MultiSigApprovalContract
+// High-value payments above `high_value_threshold` require `threshold` distinct
+// approvals before the transfer executes. Low-value payments can be force-
+// executed by admin immediately.
+// ============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct PaymentProposal {
+    pub proposer: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub token: Address,
+    pub approval_count: u32,
+    pub executed: bool,
+}
+
+#[contract]
+pub struct MultiSigApprovalContract;
+
+#[contractimpl]
+impl MultiSigApprovalContract {
+    /// Set up the multi-sig contract.
+    /// `threshold`            – number of approvals required for high-value payments.
+    /// `high_value_threshold` – amounts >= this value require multi-sig.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        threshold: u32,
+        high_value_threshold: i128,
+    ) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        if threshold == 0 {
+            panic!("Threshold must be at least 1");
+        }
+        if high_value_threshold <= 0 {
+            panic!("High-value threshold must be positive");
+        }
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "threshold"), &threshold);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "hv_threshold"), &high_value_threshold);
+        env.storage().instance().set(
+            &Symbol::new(&env, "proposals"),
+            &Map::<Symbol, PaymentProposal>::new(&env),
+        );
+        // Map of (proposal_id, approver) -> bool to track unique approvals
+        env.storage().instance().set(
+            &Symbol::new(&env, "approvals"),
+            &Map::<(Symbol, Address), bool>::new(&env),
+        );
+    }
+
+    /// Propose a payment. The proposer must be authorized (admin or already an
+    /// authorized address).
+    pub fn propose_payment(
+        env: Env,
+        id: Symbol,
+        proposer: Address,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+    ) {
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        proposer.require_auth();
+
+        // Only admin can propose (extendable to role list)
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        if proposer != admin {
+            panic!("Only admin may propose payments");
+        }
+
+        let mut proposals: Map<Symbol, PaymentProposal> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "proposals"))
+            .unwrap_or_else(|| Map::new(&env));
+        if proposals.contains_key(id.clone()) {
+            panic!("Proposal ID already exists");
+        }
+        proposals.set(
+            id.clone(),
+            PaymentProposal {
+                proposer: proposer.clone(),
+                recipient,
+                amount,
+                token,
+                approval_count: 0,
+                executed: false,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "proposals"), &proposals);
+
+        env.events().publish(
+            (Symbol::new(&env, "payment_proposed"), &proposer),
+            (id, amount),
+        );
+    }
+
+    /// Add an approval for `id`. If the approval count reaches `threshold` and
+    /// the payment is high-value, the payment executes automatically.
+    pub fn approve(env: Env, id: Symbol, approver: Address) {
+        approver.require_auth();
+
+        // Deduplicate approvals
+        let mut approvals: Map<(Symbol, Address), bool> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "approvals"))
+            .unwrap_or_else(|| Map::new(&env));
+        let key = (id.clone(), approver.clone());
+        if approvals.get(key.clone()).unwrap_or(false) {
+            panic!("Already approved");
+        }
+        approvals.set(key, true);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "approvals"), &approvals);
+
+        let mut proposals: Map<Symbol, PaymentProposal> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "proposals"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut proposal = proposals
+            .get(id.clone())
+            .unwrap_or_else(|| panic!("Proposal not found"));
+        if proposal.executed {
+            panic!("Proposal already executed");
+        }
+
+        proposal.approval_count += 1;
+
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "threshold"))
+            .unwrap_or(1);
+        let hv_threshold: i128 = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "hv_threshold"))
+            .unwrap_or(0);
+
+        // Auto-execute when threshold reached for high-value payments
+        if proposal.amount >= hv_threshold && proposal.approval_count >= threshold {
+            Self::do_execute(&env, &mut proposal);
+        }
+
+        proposals.set(id.clone(), proposal.clone());
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "proposals"), &proposals);
+
+        env.events().publish(
+            (Symbol::new(&env, "approval_added"), &approver),
+            (id, proposal.approval_count),
+        );
+    }
+
+    /// Admin force-executes a payment that is below the high-value threshold
+    /// without waiting for multiple approvals.
+    pub fn execute_payment(env: Env, id: Symbol) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let hv_threshold: i128 = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "hv_threshold"))
+            .unwrap_or(0);
+
+        let mut proposals: Map<Symbol, PaymentProposal> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "proposals"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut proposal = proposals
+            .get(id.clone())
+            .unwrap_or_else(|| panic!("Proposal not found"));
+        if proposal.executed {
+            panic!("Proposal already executed");
+        }
+        if proposal.amount >= hv_threshold {
+            panic!("High-value payment requires multi-sig approval");
+        }
+
+        Self::do_execute(&env, &mut proposal);
+        proposals.set(id.clone(), proposal);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "proposals"), &proposals);
+
+        env.events().publish(
+            (Symbol::new(&env, "payment_executed"), &admin),
+            id,
+        );
+    }
+
+    fn do_execute(env: &Env, proposal: &mut PaymentProposal) {
+        let escrow = env.current_contract_address();
+        env.invoke_contract::<()>(
+            &proposal.token,
+            &Symbol::new(env, "transfer"),
+            (escrow, proposal.recipient.clone(), proposal.amount),
+        );
+        proposal.executed = true;
+    }
+
+    /// Returns the current approval count for a proposal.
+    pub fn get_approvals(env: Env, id: Symbol) -> u32 {
+        let proposals: Map<Symbol, PaymentProposal> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "proposals"))
+            .unwrap_or_else(|| Map::new(&env));
+        proposals
+            .get(id)
+            .map(|p| p.approval_count)
+            .unwrap_or(0)
+    }
+
+    /// Returns whether a proposal has been executed.
+    pub fn is_executed(env: Env, id: Symbol) -> bool {
+        let proposals: Map<Symbol, PaymentProposal> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "proposals"))
+            .unwrap_or_else(|| Map::new(&env));
+        proposals.get(id).map(|p| p.executed).unwrap_or(false)
+    }
+}
+
+// ============================================================================
+// Issue #491: HTLCContract — Hash Time Lock Contract
+// Provides atomic cross-asset swap guarantees. The sender locks funds with a
+// SHA-256 hashlock; the recipient claims with the preimage. If the timelock
+// expires the sender may reclaim.
+// ============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct HtlcLock {
+    pub sender: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub hashlock: BytesN<32>,
+    pub timelock: u64,
+    /// 0 = active, 1 = withdrawn, 2 = refunded
+    pub status: u32,
+}
+
+#[contract]
+pub struct HTLCContract;
+
+#[contractimpl]
+impl HTLCContract {
+    /// Initialize the HTLC contract with an admin and the token it will lock.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "locks"),
+            &Map::<Symbol, HtlcLock>::new(&env),
+        );
+    }
+
+    /// Sender locks `amount` tokens under `id`.
+    /// `hashlock` – SHA-256 hash of the preimage the recipient must reveal.
+    /// `timelock`  – ledger timestamp after which the sender may refund.
+    pub fn lock(
+        env: Env,
+        id: Symbol,
+        sender: Address,
+        recipient: Address,
+        amount: i128,
+        hashlock: BytesN<32>,
+        timelock: u64,
+    ) {
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        if timelock <= env.ledger().timestamp() {
+            panic!("Timelock must be in the future");
+        }
+        sender.require_auth();
+
+        let mut locks: Map<Symbol, HtlcLock> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "locks"))
+            .unwrap_or_else(|| Map::new(&env));
+        if locks.contains_key(id.clone()) {
+            panic!("Lock ID already exists");
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let contract_addr = env.current_contract_address();
+
+        // Pull tokens into contract escrow
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (sender.clone(), contract_addr, amount),
+        );
+
+        locks.set(
+            id.clone(),
+            HtlcLock {
+                sender: sender.clone(),
+                recipient,
+                amount,
+                hashlock,
+                timelock,
+                status: 0,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "locks"), &locks);
+
+        env.events().publish(
+            (Symbol::new(&env, "htlc_locked"), &sender),
+            (id, amount),
+        );
+    }
+
+    /// Recipient reveals the 32-byte preimage to withdraw locked funds.
+    /// The contract verifies sha256(preimage) == hashlock.
+    pub fn withdraw(env: Env, id: Symbol, preimage: BytesN<32>) {
+        let mut locks: Map<Symbol, HtlcLock> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "locks"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut htlc = locks
+            .get(id.clone())
+            .unwrap_or_else(|| panic!("Lock not found"));
+
+        if htlc.status != 0 {
+            panic!("Lock is not active");
+        }
+
+        // Verify preimage: sha256(preimage) must equal hashlock
+        let hash = env.crypto().sha256(&preimage.into());
+        let hash_bytes: BytesN<32> = BytesN::from_array(&env, &hash.to_array());
+        if hash_bytes != htlc.hashlock {
+            panic!("Invalid preimage");
+        }
+
+        htlc.recipient.require_auth();
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let contract_addr = env.current_contract_address();
+
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (contract_addr, htlc.recipient.clone(), htlc.amount),
+        );
+
+        htlc.status = 1; // withdrawn
+        locks.set(id.clone(), htlc.clone());
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "locks"), &locks);
+
+        env.events().publish(
+            (Symbol::new(&env, "htlc_withdrawn"), &htlc.recipient),
+            (id, htlc.amount),
+        );
+    }
+
+    /// Sender reclaims funds after the timelock has expired.
+    pub fn refund(env: Env, id: Symbol) {
+        let mut locks: Map<Symbol, HtlcLock> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "locks"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut htlc = locks
+            .get(id.clone())
+            .unwrap_or_else(|| panic!("Lock not found"));
+
+        if htlc.status != 0 {
+            panic!("Lock is not active");
+        }
+        if env.ledger().timestamp() < htlc.timelock {
+            panic!("Timelock has not expired");
+        }
+
+        htlc.sender.require_auth();
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let contract_addr = env.current_contract_address();
+
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (contract_addr, htlc.sender.clone(), htlc.amount),
+        );
+
+        htlc.status = 2; // refunded
+        locks.set(id.clone(), htlc.clone());
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "locks"), &locks);
+
+        env.events().publish(
+            (Symbol::new(&env, "htlc_refunded"), &htlc.sender),
+            (id, htlc.amount),
+        );
+    }
+
+    /// Returns the status of a lock: 0 = active, 1 = withdrawn, 2 = refunded.
+    pub fn get_status(env: Env, id: Symbol) -> u32 {
+        let locks: Map<Symbol, HtlcLock> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "locks"))
+            .unwrap_or_else(|| Map::new(&env));
+        locks
+            .get(id)
+            .map(|h| h.status)
+            .unwrap_or_else(|| panic!("Lock not found"))
+    }
+}
+
+// ============================================================================
+// Issue #492: RefundContract
+// Mirrors the Prisma `Donation.REFUNDED` status on-chain. Records payments and
+// allows the admin to trigger on-chain refunds back to the original donor.
+// ============================================================================
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DonationRecord {
+    pub donor: Address,
+    pub amount: i128,
+    pub refunded: bool,
+}
+
+#[contract]
+pub struct RefundContract;
+
+#[contractimpl]
+impl RefundContract {
+    /// Initialize the refund contract with an admin and the token to refund.
+    pub fn initialize(env: Env, admin: Address, token: Address) {
+        if env.storage().instance().has(&Symbol::new(&env, "admin")) {
+            panic!("Contract already initialized");
+        }
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "token"), &token);
+        env.storage().instance().set(
+            &Symbol::new(&env, "donations"),
+            &Map::<Symbol, DonationRecord>::new(&env),
+        );
+    }
+
+    /// Record a donation payment so the contract knows the donor and amount.
+    /// Pulls `amount` tokens from the donor into the contract (mirrors donate flow).
+    pub fn record_payment(env: Env, donation_id: Symbol, donor: Address, amount: i128) {
+        if amount <= 0 {
+            panic!("Amount must be positive");
+        }
+        donor.require_auth();
+
+        let mut donations: Map<Symbol, DonationRecord> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "donations"))
+            .unwrap_or_else(|| Map::new(&env));
+        if donations.contains_key(donation_id.clone()) {
+            panic!("Donation ID already recorded");
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let contract_addr = env.current_contract_address();
+
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (donor.clone(), contract_addr, amount),
+        );
+
+        donations.set(
+            donation_id.clone(),
+            DonationRecord {
+                donor,
+                amount,
+                refunded: false,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "donations"), &donations);
+    }
+
+    /// Admin processes a refund: transfers the original amount back to the donor
+    /// and marks the donation as refunded on-chain.
+    pub fn process_refund(env: Env, donation_id: Symbol) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "admin"))
+            .unwrap_or_else(|| panic!("Admin not set"));
+        admin.require_auth();
+
+        let mut donations: Map<Symbol, DonationRecord> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "donations"))
+            .unwrap_or_else(|| Map::new(&env));
+        let mut record = donations
+            .get(donation_id.clone())
+            .unwrap_or_else(|| panic!("Donation not found"));
+
+        if record.refunded {
+            panic!("Donation already refunded");
+        }
+
+        let token: Address = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "token"))
+            .unwrap_or_else(|| panic!("Token not set"));
+        let contract_addr = env.current_contract_address();
+
+        env.invoke_contract::<()>(
+            &token,
+            &Symbol::new(&env, "transfer"),
+            (contract_addr, record.donor.clone(), record.amount),
+        );
+
+        record.refunded = true;
+        donations.set(donation_id.clone(), record.clone());
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "donations"), &donations);
+
+        env.events().publish(
+            (Symbol::new(&env, "refund_processed"), &admin),
+            (donation_id, record.donor, record.amount),
+        );
+    }
+
+    /// Returns `true` if the donation has been refunded on-chain.
+    pub fn get_refund_status(env: Env, donation_id: Symbol) -> bool {
+        let donations: Map<Symbol, DonationRecord> = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "donations"))
+            .unwrap_or_else(|| Map::new(&env));
+        donations
+            .get(donation_id)
+            .map(|r| r.refunded)
+            .unwrap_or_else(|| panic!("Donation not found"))
+    }
+}
