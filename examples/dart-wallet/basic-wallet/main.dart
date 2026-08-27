@@ -2,8 +2,8 @@ import 'package:stellar/stellar.dart';
 
 void main() async {
   final keypair = Keypair.random();
-  print('Public Key: \');
-  print('Secret Seed: \');
+  print('Public Key: ${keypair.accountId}');
+  print('Secret Seed: ${keypair.secretSeed}');
 
   final server = Server('https://horizon-testnet.stellar.org');
   await FriendBot.fundTestAccount(keypair.accountId);
@@ -11,7 +11,7 @@ void main() async {
 
   final account = await server.accounts.account(keypair.accountId);
   for (final balance in account.balances) {
-    print('Balance: \ \');
+    print('Balance: ${balance.assetType} ${balance.balance}');
   }
 
   final destination = 'GBSH7WNSDU5K3J2I5H3K2M6QZQKJ3PZ7PJ3VJ6QZQKJ3PZ7PJ3VJ6';
@@ -25,5 +25,5 @@ void main() async {
 
   transaction.sign(keypair);
   final response = await server.submitTransaction(transaction);
-  print('Transaction hash: \');
+  print('Transaction hash: ${response.hash}');
 }
