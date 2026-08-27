@@ -766,6 +766,10 @@ pub struct Proposal {
     pub title: Symbol,
     pub start_time: u64,
     pub end_time: u64,
+    pub executed: bool,
+}
+
+#[contracttype]
 #[derive(Clone)]
 pub struct LockedQuote {
     pub creator: Address,
@@ -961,6 +965,10 @@ impl GovernanceContract {
             panic!("Quorum must be between 0 and 10000 basis points");
         }
         env.storage().instance().set(&Symbol::new(&env, "quorum_bps"), &quorum_bps);
+    }
+}
+
+#[contract]
 pub struct QuoteLockContract;
 
 #[contractimpl]

@@ -18,6 +18,13 @@ export interface WalletSnapshot {
   updatedAt: string
 }
 
+export interface QuickStats {
+  totalTransactions: number
+  networkFeeSavedUsd: number
+  accountAgeDays: number
+  accountCreatedAt?: string
+}
+
 export interface AssetGroup {
   category: AssetCategory
   label: string
