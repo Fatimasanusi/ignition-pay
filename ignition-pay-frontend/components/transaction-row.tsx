@@ -1,6 +1,16 @@
 'use client'
 
-import { ArrowUpRight, ArrowDownLeft, Loader2 } from 'lucide-react'
+import {
+  ArrowUpRight,
+  ArrowDownLeft,
+  Loader2,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  RotateCcw,
+  RefreshCw,
+  ExternalLink,
+} from 'lucide-react'
 import type { Transaction, OptimisticTransaction } from '@/features/history/models'
 import { isOptimisticTransaction } from '@/features/history/models'
 import {
@@ -11,7 +21,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { ExternalLink } from 'lucide-react'
+import { useTranslation } from '@/lib/i18n'
 
 interface TransactionRowProps {
   transaction: Transaction | OptimisticTransaction
@@ -20,23 +30,25 @@ interface TransactionRowProps {
 /**
  * Status badge component that handles both real and optimistic transactions.
  * Optimistic transactions show a loading spinner to indicate pending confirmation.
+ * Pairs colors with distinct status icons and clear text labels for accessibility.
  */
 function TransactionStatusBadge({
   transaction,
 }: {
   transaction: Transaction | OptimisticTransaction
 }) {
+  const { t } = useTranslation()
   const isOptimistic = isOptimisticTransaction(transaction)
 
   if (isOptimistic) {
     return (
       <span
-        className="text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-500 flex items-center gap-1"
-        aria-label="Transaction pending confirmation"
+        className="text-xs px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-500 inline-flex items-center gap-1 font-medium"
+        aria-label={t('transactionRow.pendingConfirmation')}
         aria-live="polite"
       >
         <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-        Pending...
+        {t('common.pending')}...
       </span>
     )
   }
@@ -47,21 +59,36 @@ function TransactionStatusBadge({
     completed: 'bg-green-500/20 text-green-500',
     failed: 'bg-red-500/20 text-red-500',
     refunded: 'bg-purple-500/20 text-purple-500',
-    confirmed: 'bg-green-500/20 text-green-500', // Assuming confirmed is same as completed
+    confirmed: 'bg-green-500/20 text-green-500',
+  }
+
+  const statusIcons: Record<Transaction['status'], React.ReactNode> = {
+    pending: <Clock size={12} aria-hidden="true" />,
+    processing: <RefreshCw size={12} className="animate-spin" aria-hidden="true" />,
+    completed: <CheckCircle2 size={12} aria-hidden="true" />,
+    failed: <XCircle size={12} aria-hidden="true" />,
+    refunded: <RotateCcw size={12} aria-hidden="true" />,
+    confirmed: <CheckCircle2 size={12} aria-hidden="true" />,
   }
 
   const statusLabel: Record<Transaction['status'], string> = {
-    pending: 'Pending',
-    processing: 'Processing',
-    completed: 'Completed',
-    failed: 'Failed',
-    refunded: 'Refunded',
-    confirmed: 'Confirmed',
+    pending: t('common.pending'),
+    processing: t('common.processing'),
+    completed: t('common.completed'),
+    failed: t('common.failed'),
+    refunded: t('common.refunded'),
+    confirmed: t('common.confirmed'),
   }
 
   return (
-    <span className={`text-xs px-2 py-1 rounded-full ${statusColors[transaction.status]}`}>
-      {statusLabel[transaction.status]}
+    <span
+      className={`text-xs px-2 py-1 rounded-full inline-flex items-center gap-1 font-medium ${
+        statusColors[transaction.status]
+      }`}
+      aria-label={`Status: ${statusLabel[transaction.status]}`}
+    >
+      {statusIcons[transaction.status]}
+      <span>{statusLabel[transaction.status]}</span>
     </span>
   )
 }
@@ -71,6 +98,7 @@ interface TransactionRowProps {
 }
 
 export function TransactionRow({ transaction }: TransactionRowProps) {
+  const { t } = useTranslation()
   const { type, asset, amount, recipient, timestamp, status } = transaction
   const displayRecipient = recipient.slice(0, 6) + '...' + recipient.slice(-4)
   const isSent = type === 'sent'
@@ -107,14 +135,14 @@ export function TransactionRow({ transaction }: TransactionRowProps) {
           } ${isOptimistic ? 'opacity-60' : ''}`}
         >
           {isSent ? (
-            <ArrowUpRight size={20} className="text-red-500" />
+            <ArrowUpRight size={20} className="text-red-500" aria-label="Sent icon" />
           ) : (
-            <ArrowDownLeft size={20} className="text-green-500" />
+            <ArrowDownLeft size={20} className="text-green-500" aria-label="Received icon" />
           )}
         </div>
         <div className="flex-1 min-w-0">
           <p className={`font-semibold ${isOptimistic ? 'text-muted-foreground' : 'text-foreground'}`}>
-            {isSent ? 'Sent' : 'Received'} {asset}
+            {isSent ? t('transactionRow.sent') : t('transactionRow.received')} {asset}
           </p>
           <p className="text-sm text-muted-foreground truncate">{displayRecipient}</p>
         </div>
@@ -133,22 +161,22 @@ export function TransactionRow({ transaction }: TransactionRowProps) {
       
       <SheetContent side="right">
         <SheetHeader>
-          <SheetTitle>Transaction Details</SheetTitle>
+          <SheetTitle>{t('transactionRow.details')}</SheetTitle>
           <SheetDescription>
-            Additional information about this transfer
+            {t('transactionRow.detailsDesc')}
           </SheetDescription>
         </SheetHeader>
         
         <div className="mt-6 space-y-6">
           {/* Status */}
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Status</span>
+            <span className="text-sm text-muted-foreground">{t('transactionRow.status')}</span>
             <TransactionStatusBadge transaction={transaction} />
           </div>
 
           {/* Amount */}
           <div className="flex flex-col gap-1">
-            <span className="text-sm text-muted-foreground">Amount</span>
+            <span className="text-sm text-muted-foreground">{t('transactionRow.amount')}</span>
             <p className={`text-xl font-bold ${isSent ? 'text-red-500' : 'text-green-500'}`}>
               {isSent ? '-' : '+'}{amount.toFixed(4)} {asset}
             </p>
@@ -156,19 +184,19 @@ export function TransactionRow({ transaction }: TransactionRowProps) {
 
           {/* Timestamp */}
           <div className="flex flex-col gap-1">
-            <span className="text-sm text-muted-foreground">Date & Time</span>
+            <span className="text-sm text-muted-foreground">{t('transactionRow.dateTime')}</span>
             <p className="text-sm text-foreground">{formattedDate}</p>
           </div>
 
           {/* Fee */}
           <div className="flex flex-col gap-1">
-            <span className="text-sm text-muted-foreground">Network Fee</span>
+            <span className="text-sm text-muted-foreground">{t('transactionRow.networkFee')}</span>
             <p className="text-sm text-foreground">{networkFee}</p>
           </div>
 
           {/* Recipient */}
           <div className="flex flex-col gap-1">
-            <span className="text-sm text-muted-foreground">{isSent ? 'To' : 'From'}</span>
+            <span className="text-sm text-muted-foreground">{isSent ? t('transactionRow.to') : t('transactionRow.from')}</span>
             <p className="text-sm font-mono break-all bg-muted/30 p-2 rounded-md">
               {recipient}
             </p>

@@ -5,19 +5,16 @@ import { usePathname } from 'next/navigation'
 import { Wallet, Send, ArrowDownUp, History, Anchor, Settings, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 
-const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: Wallet },
-  { href: '/send', label: 'Send', icon: Send },
-  { href: '/receive', label: 'Receive', icon: ArrowDownUp },
-  { href: '/history', label: 'History', icon: History },
-  { href: '/anchors', label: 'Anchors', icon: Anchor },
-  { href: '/settings', label: 'Settings', icon: Settings },
-]
+import { useTranslation } from '@/lib/i18n'
 
-/** The four primary destinations, surfaced as a bottom tab bar on mobile. */
-const bottomTabs = navItems.filter((item) =>
-  ['/dashboard', '/send', '/receive', '/history'].includes(item.href),
-)
+const navItemsDef = [
+  { href: '/dashboard', translationKey: 'common.dashboard', defaultLabel: 'Dashboard', icon: Wallet },
+  { href: '/send', translationKey: 'common.send', defaultLabel: 'Send', icon: Send },
+  { href: '/receive', translationKey: 'common.receive', defaultLabel: 'Receive', icon: ArrowDownUp },
+  { href: '/history', translationKey: 'common.history', defaultLabel: 'History', icon: History },
+  { href: '/anchors', translationKey: 'common.anchors', defaultLabel: 'Anchors', icon: Anchor },
+  { href: '/settings', translationKey: 'common.settings', defaultLabel: 'Settings', icon: Settings },
+]
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed'
 
@@ -31,9 +28,19 @@ function getInitialCollapsed(): boolean {
 }
 
 export function Navigation() {
+  const { t } = useTranslation()
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(getInitialCollapsed)
+
+  const navItems = navItemsDef.map((item) => ({
+    ...item,
+    label: t(item.translationKey),
+  }))
+
+  const bottomTabs = navItems.filter((item) =>
+    ['/dashboard', '/send', '/receive', '/history'].includes(item.href),
+  )
 
   useEffect(() => {
     try {

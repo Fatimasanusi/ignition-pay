@@ -55,6 +55,8 @@ const themeInitScript = `
 })();
 `
 
+import { LanguageProvider } from '@/lib/i18n'
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -66,8 +68,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="font-sans antialiased bg-background text-foreground">
-        {children}
-        {process.env.NODE_ENV === 'production' && <ConsentGate />}
+        <LanguageProvider>
+          {children}
+          {process.env.NODE_ENV === 'production' && <ConsentGate />}
+        </LanguageProvider>
       </body>
     </html>
   )
