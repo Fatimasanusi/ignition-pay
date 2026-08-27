@@ -12,8 +12,9 @@ import { MASKED_AMOUNT, useHideBalances } from '@/hooks/use-hide-balances'
 import { InlineEmpty, InlineError, InlineSkeleton } from '@/components/inline-state'
 import { groupAssets, portfolioChange24h, totalValue } from '@/features/dashboard/models'
 import { DEMO_WALLET_ADDRESS } from '@/features/dashboard/services'
-import { useWalletBalances } from '@/features/dashboard/state'
+import { useWalletBalances, useQuickStats } from '@/features/dashboard/state'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { useTranslation } from '@/lib/i18n'
 
 // Mock transactions (to be replaced by real API integration)
 const mockTransactions = [
@@ -47,9 +48,11 @@ const mockTransactions = [
 ]
 
 export function DashboardPage() {
+  const { t } = useTranslation()
   const { isHidden, toggle } = useHideBalances()
   const { snapshot, status, error, isRefreshing, isLive, refresh } =
     useWalletBalances(DEMO_WALLET_ADDRESS)
+  const { stats } = useQuickStats(snapshot?.address)
 
   const assets = useMemo(() => snapshot?.assets ?? [], [snapshot])
   const groups = useMemo(() => groupAssets(assets), [assets])
@@ -64,9 +67,9 @@ export function DashboardPage() {
         <div className="px-6 py-8 max-w-7xl mx-auto">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+              <h1 className="text-3xl font-bold text-foreground">{t('dashboard.title')}</h1>
               <p className="text-muted-foreground mt-1">
-                Welcome back! Here&apos;s your wallet overview.
+                {t('dashboard.welcome')}
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -75,21 +78,21 @@ export function DashboardPage() {
                 variant="outline"
                 onClick={toggle}
                 aria-pressed={isHidden}
-                aria-label={isHidden ? 'Show balances' : 'Hide balances'}
+                aria-label={isHidden ? t('common.show') : t('common.hide')}
               >
                 {isHidden ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
-                {isHidden ? 'Show' : 'Hide'}
+                {isHidden ? t('common.show') : t('common.hide')}
               </Button>
               <Link href="/receive">
                 <Button variant="outline">
                   <ArrowDownLeft className="mr-2 h-4 w-4" />
-                  Receive
+                  {t('common.receive')}
                 </Button>
               </Link>
               <Link href="/send">
                 <Button className="bg-primary hover:bg-primary/90">
                   <Send className="mr-2 h-4 w-4" />
-                  Send
+                  {t('common.send')}
                 </Button>
               </Link>
             </div>
@@ -107,7 +110,7 @@ export function DashboardPage() {
               aria-live="polite"
               className="h-56 rounded-2xl border border-border bg-card animate-pulse"
             >
-              <span className="sr-only">Loading wallet balances</span>
+              <span className="sr-only">{t('dashboard.loadingBalances')}</span>
             </div>
           )}
 
@@ -147,9 +150,9 @@ export function DashboardPage() {
           <div>
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Assets</h2>
+                <h2 className="text-2xl font-bold text-foreground">{t('dashboard.assets')}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Your Stellar assets and balances
+                  {t('dashboard.assetsSubtitle')}
                 </p>
               </div>
               {snapshot && assets.length > 0 && (
@@ -176,13 +179,13 @@ export function DashboardPage() {
 
             {snapshot && assets.length === 0 && (
               <InlineEmpty
-                title="No assets yet"
-                description="Fund this wallet or receive a payment to see balances here."
+                title={t('dashboard.noAssetsTitle')}
+                description={t('dashboard.noAssetsDesc')}
                 action={
                   <Link href="/receive">
                     <Button variant="outline">
                       <ArrowDownLeft className="mr-2 h-4 w-4" />
-                      Receive funds
+                      {t('dashboard.receiveFunds')}
                     </Button>
                   </Link>
                 }
@@ -226,24 +229,24 @@ export function DashboardPage() {
           <div>
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Recent Transactions</h2>
+                <h2 className="text-2xl font-bold text-foreground">{t('dashboard.recentTransactions')}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Your latest activity on the Stellar network
+                  {t('dashboard.recentTxSubtitle')}
                 </p>
               </div>
               <Link href="/history">
-                <Button variant="ghost">View All</Button>
+                <Button variant="ghost">{t('dashboard.viewAll')}</Button>
               </Link>
             </div>
             {mockTransactions.length === 0 ? (
               <InlineEmpty
-                title="No transactions yet"
-                description="Payments you send or receive will appear here."
+                title={t('dashboard.noTxTitle')}
+                description={t('dashboard.noTxDesc')}
               />
             ) : (
               <div className="bg-card rounded-xl border border-border divide-y divide-border overflow-hidden">
                 {mockTransactions.map((tx) => (
-                  <TransactionRow key={tx.id} {...tx} />
+                  <TransactionRow key={tx.id} transaction={tx} />
                 ))}
               </div>
             )}
@@ -252,21 +255,29 @@ export function DashboardPage() {
           {/* Quick Stats */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-card rounded-xl border border-border p-6">
-              <p className="text-muted-foreground text-sm">Total Transactions</p>
-              <p className="text-3xl font-bold text-primary mt-2">156</p>
-              <p className="text-xs text-muted-foreground mt-2">All time on Stellar</p>
-            </div>
-            <div className="bg-card rounded-xl border border-border p-6">
-              <p className="text-muted-foreground text-sm">Network Fee Saved</p>
-              <p className="text-3xl font-bold text-green-500 mt-2">
-                {isHidden ? MASKED_AMOUNT : '$127.85'}
+              <p className="text-muted-foreground text-sm">{t('dashboard.totalTransactions')}</p>
+              <p className="text-3xl font-bold text-primary mt-2">
+                {stats ? stats.totalTransactions : 156}
               </p>
-              <p className="text-xs text-muted-foreground mt-2">vs traditional payment</p>
+              <p className="text-xs text-muted-foreground mt-2">{t('dashboard.allTimeStellar')}</p>
             </div>
             <div className="bg-card rounded-xl border border-border p-6">
-              <p className="text-muted-foreground text-sm">Account Age</p>
-              <p className="text-3xl font-bold text-foreground mt-2">432 days</p>
-              <p className="text-xs text-muted-foreground mt-2">Active Stellar member</p>
+              <p className="text-muted-foreground text-sm">{t('dashboard.networkFeeSaved')}</p>
+              <p className="text-3xl font-bold text-green-500 mt-2">
+                {isHidden
+                  ? MASKED_AMOUNT
+                  : stats
+                    ? `$${stats.networkFeeSavedUsd.toFixed(2)}`
+                    : '$127.85'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">{t('dashboard.vsTraditional')}</p>
+            </div>
+            <div className="bg-card rounded-xl border border-border p-6">
+              <p className="text-muted-foreground text-sm">{t('dashboard.accountAge')}</p>
+              <p className="text-3xl font-bold text-foreground mt-2">
+                {stats ? `${stats.accountAgeDays} ${t('dashboard.days')}` : `432 ${t('dashboard.days')}`}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">{t('dashboard.activeMember')}</p>
             </div>
           </div>
         </div>
